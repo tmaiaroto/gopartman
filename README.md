@@ -14,5 +14,5 @@ There's a few possible use cases and reasons why you might want to use this pack
 
 * You can manage partitions on any server from your command line and crontab (much like the Python scripts in pg_partman)    
 * You can bring this package into your Go application so it can manage partitions    
-* You can manage multiple partitions on multiple servers with different rules from a YAML configuration    
-* You can setup an API server using this package to manage partitions on server via some sort of RESTful interface    
+* You can manage multiple partitions on multiple databases with different rules from a YAML configuration    
+* You can setup an API server using this package to manage partitions on databases via some sort of RESTful interface    
