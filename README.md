@@ -8,3 +8,11 @@ This makes it compatible with hosted Postgres services like Amazon RDS. In order
 This package is meant to build a binary which can be used from the command line or daemonized to run and constantly monitor and manage your Postgres partitions 
 given instructions by you. It is configurable. It can also be brought into another package for use there as well and need not run by itself. Just keep 
 in mind that there are regular tasks that need to be performed to manage your Postgres partition tables.
+
+### Uses
+There's a few possible use cases and reasons why you might want to use this package over the actual pg_partman project. Especially if you're a Go developer.
+
+* You can manage partitions on any server from your command line and crontab (much like the Python scripts in pg_partman)    
+* You can bring this package into your Go application so it can manage partitions    
+* You can manage multiple partitions on multiple servers with different rules from a YAML configuration    
+* You can setup an API server using this package to manage partitions on server via some sort of RESTful interface    
