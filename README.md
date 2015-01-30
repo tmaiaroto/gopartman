@@ -10,9 +10,12 @@ given instructions by you. It is configurable. It can also be brought into anoth
 in mind that there are regular tasks that need to be performed to manage your Postgres partition tables.
 
 ### Uses
-There's a few possible use cases and reasons why you might want to use this package over the actual pg_partman project. Especially if you're a Go developer.
+There's a few possible use cases and reasons why you might want to use this package over the actual pg_partman extension. Especially if you're a Go developer.
 
 * You can manage partitions on any server from your command line and crontab (much like the Python scripts in pg_partman)    
 * You can bring this package into your Go application so it can manage partitions    
 * You can manage multiple partitions on multiple databases with different rules from a YAML configuration    
 * You can setup an API server using this package to manage partitions on databases via some sort of RESTful interface    
+
+There of course, are also some drawbacks. Namely, this package needs to get manual updates when pg_partman upates. This means you'd need to re-build it and keep an eye out for updates. 
+Fortunately, there shouldn't be too many updates.
