@@ -57,7 +57,11 @@ func (db DB) loadSqlTypes() {
 // Loads functions from pg_partman
 func (db DB) loadSqlFunctions() {
 	var err error
-	tx := db.MustBegin()
+	tx, err := db.Begin()
+	if err != nil {
+		log.Error("%v", err)
+		return
+	}
 
 	// apply_constraints()
 	_, err = tx.Exec(`
@@ -4393,9 +4397,13 @@ func (db DB) loadSqlFunctions() {
 
 // Sets up tables to keep track of partitions
 func (db DB) loadSqlTables() {
-	tx := db.MustBegin()
-
 	var err error
+	tx, err := db.Begin()
+	if err != nil {
+		log.Error("%v", err)
+		return
+	}
+
 	_, err = tx.Exec(`
 		CREATE TABLE partman.part_config (
 		    parent_table text NOT NULL,

@@ -34,6 +34,7 @@ type GoPartManFlags struct {
 	partTable     string
 	partColumn    string
 	partType      string
+	partInterval  string
 	partRetention string
 }
 
@@ -47,10 +48,11 @@ var versionCmd = &cobra.Command{
 	},
 }
 
+// Installs the partman schema and its objects.
 var installPartmanCmd = &cobra.Command{
 	Use:   "install",
 	Short: "Installs pg_partman",
-	Long:  "Installs pg_partman into a `partman` schema with its objects to manage partitions.",
+	Long:  "\nInstalls pg_partman into a `partman` schema with its objects to manage partitions\n(Note: This is automatically installed, if not installed, when creating a partition).",
 	Run: func(cmd *cobra.Command, args []string) {
 		if !flaggedDB.sqlFunctionsExist() {
 			log.Info("Installing pg_partman on " + flags.pgDatabase)
@@ -61,10 +63,11 @@ var installPartmanCmd = &cobra.Command{
 	},
 }
 
+// Reinstalls the partman schema and its objects by first dropping the `partman` schema and then installing again.
 var reinstallPartmanCmd = &cobra.Command{
 	Use:   "reinstall",
 	Short: "Re-installs pg_partman",
-	Long:  "Note that re-installing pg_partman will drop the `partman` schema and all objects. So any existing partitions on the database will cease to be managed.",
+	Long:  "\nNote that re-installing pg_partman will drop the `partman` schema and all objects.\nSo any existing partitions on the database will cease to be managed.",
 	Run: func(cmd *cobra.Command, args []string) {
 		log.Info("Re-installing pg_artman on " + flags.pgDatabase)
 		flaggedDB.unloadPartman()
@@ -72,7 +75,43 @@ var reinstallPartmanCmd = &cobra.Command{
 	},
 }
 
-// Logging in a pretty way.
+// Create a partition.
+var createParentCmd = &cobra.Command{
+	Use:   "create",
+	Short: "Creates a partition",
+	Long:  "\nCreates a partition for a given table. You must also pass a partition type and any other applicable options.\n(Note: This partition will require manual maintenance if the type is not `id-static` or `id-dynamic`)",
+	Run: func(cmd *cobra.Command, args []string) {
+		if !flaggedDB.sqlFunctionsExist() {
+			flaggedDB.loadPgPartman()
+		}
+
+		log.Info("Creating a partition on " + flags.pgDatabase + " for table " + flags.partTable)
+		flaggedDB.CreateParent("flagged")
+	},
+}
+
+// Runs maintenance on partitions.
+var runMaintenanceCmd = &cobra.Command{
+	Use:   "maintenance",
+	Short: "Runs maintenance on partitions",
+	Long:  "\nRuns maintenance on all tables if no table name was given. Maintenance includes adding new partition tables and removing old ones if a retention policy was set.",
+	Run: func(cmd *cobra.Command, args []string) {
+		if !flaggedDB.sqlFunctionsExist() {
+			log.Error("Error: pg_partman not installed. Please run the `install` command first.")
+			return
+		}
+
+		if flags.partTable != "" {
+			log.Info("Running maintenance on " + flags.pgDatabase + " for table " + flags.partTable)
+			flaggedDB.RunMaintenance(flags.partTable)
+		} else {
+			log.Info("Running maintenance on " + flags.pgDatabase + " for all tables")
+			flaggedDB.RunMaintenance("NULL")
+		}
+	},
+}
+
+// Logging the pretty way.
 var log = logging.MustGetLogger("gopartmanLogger")
 var logFormat = logging.MustStringFormatter(
 	"%{color}[%{time:Jan/02/2006:15:04:05 -0700}] %{shortfile} %{level:.4s} %{id:03x}%{color:reset} %{message}",
@@ -97,8 +136,9 @@ type GoPartManConfig struct {
 type Partition struct {
 	Table     string `json:"table" yaml:"table"`
 	Column    string `json:"column" yaml:"column"`
-	Retention string `json:"retention" yaml:"retention"`
 	Type      string `json:"type" yaml:"type"`
+	Interval  string `json:"interval" yaml:"interval"`
+	Retention string `json:"retention" yaml:"retention"`
 }
 
 type Server struct {
@@ -116,6 +156,7 @@ var flaggedDB DB
 // Wrap sqlx.DB in order to add to it
 type DB struct {
 	sqlx.DB
+	Partitions map[string]Partition
 }
 
 // Set up the schedule.
@@ -145,7 +186,7 @@ func NewPostgresConnection(cfg Server) (DB, error) {
 	if err != nil {
 		log.Error("%v", err)
 	}
-	return DB{*db}, err
+	return DB{*db, cfg.Partitions}, err
 }
 
 func main() {
@@ -161,6 +202,7 @@ func main() {
 	GoPartManCmd.PersistentFlags().StringVarP(&flags.partTable, "table", "t", "", "partition table")
 	GoPartManCmd.PersistentFlags().StringVarP(&flags.partColumn, "column", "c", "created", "partition column")
 	GoPartManCmd.PersistentFlags().StringVarP(&flags.partType, "type", "y", "time", "partition type")
+	GoPartManCmd.PersistentFlags().StringVarP(&flags.partInterval, "interval", "i", "", "partition interval")
 	GoPartManCmd.PersistentFlags().StringVarP(&flags.partRetention, "retention", "r", "", "partition retention period")
 	GoPartManCmd.Execute()
 
@@ -177,8 +219,9 @@ func main() {
 				"flagged": Partition{
 					Table:     flags.partTable,
 					Column:    flags.partColumn,
-					Retention: flags.partRetention,
 					Type:      flags.partType,
+					Interval:  flags.partInterval,
+					Retention: flags.partRetention,
 				},
 			},
 		})
@@ -193,6 +236,8 @@ func main() {
 	// Add these commands AFTER the flaggedDB is created
 	GoPartManCmd.AddCommand(installPartmanCmd)
 	GoPartManCmd.AddCommand(reinstallPartmanCmd)
+	GoPartManCmd.AddCommand(createParentCmd)
+	GoPartManCmd.AddCommand(runMaintenanceCmd)
 	GoPartManCmd.Execute()
 
 	logBackend := logging.NewLogBackend(os.Stderr, "", 0)
@@ -222,7 +267,7 @@ func main() {
 		panic(err)
 	}
 
-	log.Info("%v", cfg.Servers)
+	//log.Info("%v", cfg.Servers)
 
 	// Set up all of the connections from the configuration and ensure they have the pg_partman schema, table, and functions loaded.
 	cfg.Connections = map[string]DB{}
@@ -236,6 +281,4 @@ func main() {
 
 	newSchedule()
 
-	for {
-	}
 }
