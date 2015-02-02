@@ -70,3 +70,13 @@ func (db DB) UndoPartition(partitionName string, batchCount int, dropTable bool,
 	}
 
 }
+
+// Gets information about a partition.
+func (db DB) PartitionInfo(partitionName string) PartConfig {
+	p := PartConfig{}
+	err := db.Get(&p, "SELECT parent_table,control,type,part_interval,premake FROM partman.part_config WHERE parent_table = $1 LIMIT 1", db.Partitions[partitionName].Table)
+	if err != nil {
+		log.Error("%v", err)
+	}
+	return p
+}
