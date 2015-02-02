@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/ant0ine/go-json-rest/rest"
 	"github.com/fatih/color"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
@@ -9,7 +10,9 @@ import (
 	"gopkg.in/yaml.v2"
 	"io/ioutil"
 	"log"
+	"net/http"
 	"os"
+	"strconv"
 )
 
 // Version of gopartman
@@ -50,7 +53,14 @@ var flags = GoPartManFlags{}
 var cfg = GoPartManConfig{}
 
 type GoPartManConfig struct {
-	Cron        *cron.Cron
+	Cron *cron.Cron
+	Api  struct {
+		Port int `json:"port" yaml:"port"`
+		Cors struct {
+			AllowedOrigins []string `json:"allowedOrigins" yaml:"allowedOrigins"`
+		} `json:"cors" yaml:"cors"`
+		AuthKeys []string `json:"authKeys" yaml:"authKeys"`
+	} `json:"api" yaml:"api"`
 	Servers     map[string]Server `json:"servers" yaml:"servers"`
 	Connections map[string]DB
 }
@@ -193,6 +203,50 @@ func NewFlaggedDb() DB {
 	return flaggedDB
 }
 
+// --------- API Basic Auth Middleware (valid keys are defined in the gopartman.yml config, there are no roles or anything like that)
+type BasicAuthMw struct {
+	Realm string
+	Key   string
+}
+
+func (bamw *BasicAuthMw) MiddlewareFunc(handler rest.HandlerFunc) rest.HandlerFunc {
+	return func(writer rest.ResponseWriter, request *rest.Request) {
+
+		authHeader := request.Header.Get("Authorization")
+		log.Println(authHeader)
+		if authHeader == "" {
+			queryParams := request.URL.Query()
+			if len(queryParams["apiKey"]) > 0 {
+				bamw.Key = queryParams["apiKey"][0]
+			} else {
+				bamw.unauthorized(writer)
+				return
+			}
+		} else {
+			bamw.Key = authHeader
+		}
+
+		keyFound := false
+		for _, key := range cfg.Api.AuthKeys {
+			if bamw.Key == key {
+				keyFound = true
+			}
+		}
+
+		if !keyFound {
+			bamw.unauthorized(writer)
+			return
+		}
+
+		handler(writer, request)
+	}
+}
+
+func (bamw *BasicAuthMw) unauthorized(writer rest.ResponseWriter) {
+	writer.Header().Set("WWW-Authenticate", "Basic realm="+bamw.Realm)
+	rest.Error(writer, "Not Authorized", http.StatusUnauthorized)
+}
+
 func main() {
 	GoPartManCmd.AddCommand(versionCmd)
 	GoPartManCmd.PersistentFlags().BoolVarP(&flags.daemon, "daemon", "m", false, "daemon mode")
@@ -224,36 +278,104 @@ func main() {
 
 	GoPartManCmd.Execute()
 
-	// Config based usage
-	cfgPath := "/etc/gopartman.yml"
-	if _, err := os.Stat(cfgPath); err != nil {
-		cfgPath = "./gopartman.yml"
-	}
-	b, err := ioutil.ReadFile(cfgPath)
-	if err != nil {
-		l.Critical("Configuration could not be loaded.")
-		panic(err)
-	}
+	// Config based usage available if running forever as a daemon. In this mode, the following happens:
+	// - Partitions to be managed are defined in gopartman.yml
+	// - Maintenance is regularly performed so there's no need to set any commands to run in a crontab or anything like that
+	// - An API can optionally be configured to allow:
+	// 		- CORS and Basic Auth settings for access to the API (configured in gopartman.yml)
+	// 		- Changes to configuration
+	// 		- Addition of new partitions
+	// 		- Reporting with information about partition settings and state
+	if flags.daemon {
+		cfgPath := "/etc/gopartman.yml"
+		if _, err := os.Stat(cfgPath); err != nil {
+			cfgPath = "./gopartman.yml"
+		}
+		b, err := ioutil.ReadFile(cfgPath)
+		if err != nil {
+			l.Critical("Configuration could not be loaded.")
+			panic(err)
+		}
 
-	err = yaml.Unmarshal(b, &cfg)
-	if err != nil {
-		l.Critical(err)
-		panic(err)
-	}
+		err = yaml.Unmarshal(b, &cfg)
+		if err != nil {
+			l.Critical(err)
+			panic(err)
+		}
 
-	// Set up all of the connections from the configuration and ensure they have the pg_partman schema, table, and functions loaded.
-	cfg.Connections = map[string]DB{}
-	for conn, credentials := range cfg.Servers {
-		cfg.Connections[conn], err = NewPostgresConnection(credentials)
-		if err == nil {
-			if !cfg.Connections[conn].sqlFunctionsExist() {
-				cfg.Connections[conn].loadPgPartman()
+		// Set up all of the connections from the configuration and ensure they have the pg_partman schema, table, and functions loaded.
+		cfg.Connections = map[string]DB{}
+		for conn, credentials := range cfg.Servers {
+			cfg.Connections[conn], err = NewPostgresConnection(credentials)
+			if err == nil {
+				if !cfg.Connections[conn].sqlFunctionsExist() {
+					cfg.Connections[conn].loadPgPartman()
+				}
+			} else {
+				l.Error(err)
 			}
+		}
+
+		newSchedule()
+
+		p := strconv.Itoa(cfg.Api.Port)
+		// But if it can't be parsed (maybe wasn't set) then just run the daemon without the API server.
+		// This means partitions will be managed, but nothing can be changed unless the daemon is retstarted.
+		if p != "0" {
+			restMiddleware := []rest.Middleware{}
+
+			// If additional origins were allowed for CORS, handle them
+			if len(cfg.Api.Cors.AllowedOrigins) > 0 {
+				restMiddleware = append(restMiddleware,
+					&rest.CorsMiddleware{
+						RejectNonCorsRequests: false,
+						OriginValidator: func(origin string, request *rest.Request) bool {
+							for _, allowedOrigin := range cfg.Api.Cors.AllowedOrigins {
+								// If the request origin matches one of the allowed origins, return true
+								if origin == allowedOrigin {
+									return true
+								}
+							}
+							return false
+						},
+						AllowedMethods: []string{"GET", "POST", "PUT"},
+						AllowedHeaders: []string{
+							"Accept", "Content-Type", "X-Custom-Header", "Origin"},
+						AccessControlAllowCredentials: true,
+						AccessControlMaxAge:           3600,
+					},
+				)
+			}
+			// If api keys are defined, setup basic auth (any key listed allows full access, there are no roles for now, this is just very basic auth)
+			if len(cfg.Api.AuthKeys) > 0 {
+				restMiddleware = append(restMiddleware,
+					&BasicAuthMw{
+						Realm: "gopartman API",
+						Key:   "",
+					},
+				)
+			}
+
+			handler := rest.ResourceHandler{
+				EnableRelaxedContentType: true,
+				PreRoutingMiddlewares:    restMiddleware,
+			}
+			err := handler.SetRoutes(
+			//&rest.Route{"GET", "/", HandleSomeRoute},
+			)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			log.Println("gopartman API listening on port " + p)
+			log.Fatal(http.ListenAndServe(":"+p, &handler))
 		} else {
-			l.Error(err)
+			log.Println("gopartman running without API")
+			// Run forever
+			for {
+
+			}
 		}
 	}
-
-	newSchedule()
 
 }

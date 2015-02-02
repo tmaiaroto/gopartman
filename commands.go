@@ -53,7 +53,11 @@ var createParentCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Creates a partition",
 	Long: `Creates a partition for a given table based on the options passed.
-	Partitions must be maintained with the ` + "\x1b[33m\x1b[40m" + `maintenance` + "\x1b[0m\x1b[0m" + ` command which will create new child partition tables as well as update any necessary triggeres.
+	Partitions must be maintained with the ` + "\x1b[33m\x1b[40m" + `maintenance` + "\x1b[0m\x1b[0m" + ` command (optional for types marked with *) 
+	which will create new child partition tables as well as update any necessary triggeres. Note: Only newly inserted data will appear in the
+	new partition tables. Existing data will remain in the parent table. Any data inserted for which a partition table does not exist will 
+	be stored in the original parent table.
+
 	Partition types can be one of the following:
 	
 	time-static   - Trigger function inserts only into specifically named partitions. The number of partitions
@@ -72,17 +76,17 @@ var createParentCmd = &cobra.Command{
 	                method as time-dynamic (so it can insert into any child at any time) as well as a lookup table.
 	                So, while it is the most flexible of the time-based options, it is the least performant.
 
-	id-static     - Same functionality and use of the premake value as time-static but for a numeric range 
+	id-static *   - Same functionality and use of the premake value as time-static but for a numeric range 
 	                instead of time.
 	                By default, when the id value reaches 50% of the max value for that partition, it will automatically create 
 	                the next partition in sequence if it doesn't yet exist.
 	                Only supports id values greater than or equal to zero.
 
-	id-dynamic    - Same functionality and limitations as time-dynamic but for a numeric range instead of time.
+	id-dynamic *  - Same functionality and limitations as time-dynamic but for a numeric range instead of time.
 	                Uses same 50% rule as id-static to create future partitions or can use maintenance if desired.
 	                Only supports id values greater than or equal to zero.
 	
-	The partition time interval must be set for certain partition types. Some valid strings include:
+	The partition time interval must be set for certain partition types. Some valid values include:
 
 	yearly          - One partition per year
 	quarterly       - One partition per yearly quarter. Partitions are named as YYYYqQ (ex: 2012q4)
@@ -98,14 +102,16 @@ var createParentCmd = &cobra.Command{
 	<integer>       - For ID based partitions, the integer value range of the ID that should be set per partition. 
 	                  Enter this as an integer in text format ('100' not 100). Must be greater than one.
 
-	Example: ./gopartman create -h localhost -u username -d myblogdb -t public.posts -c created -y time-static -i daily
+	Example: ./gopartman create -h localhost -u username -d myblogdb -t public.posts -c created -y time-static -i monthly
 
 	That call would create a daily partition on a posts table with 4 days before and 4 days ahead of the current date. 
 	Of course, more tables would need to be created for the future. 
 	So one would then run: ./gopartman maintenance -s localhost -u username -d myblogdb -t public.posts
 
 	That call would then create additional tables if necessary. This maintenance call should be executed on a regular basis.
-	In the case of this example, daily maintenance calls would work.
+	In the case of this example, monthly maintenance calls would work because there are 4 months created in advance.
+
+	Any new data will now be stored in an available partition (if one does not exist, it will be stored in the parent table).
 	`,
 	Run: func(cmd *cobra.Command, args []string) {
 		flaggedDB := NewFlaggedDb()
