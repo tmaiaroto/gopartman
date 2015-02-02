@@ -10,24 +10,24 @@ func (db DB) CreateParent(partitionName string) {
 	var count int
 	err := db.Get(&count, "SELECT COUNT(*) FROM partman.part_config WHERE parent_table = $1", db.Partitions[partitionName].Table)
 	if err != nil {
-		log.Error("%v", err)
+		l.Error(err)
 	}
 	if count > 0 {
-		log.Info("Partition already exists for " + db.Partitions[partitionName].Table + " you must first run `undo` on it.")
+		l.Info("Partition already exists for " + db.Partitions[partitionName].Table + " you must first run `undo` on it.")
 		return
 	}
 
 	// SELECT partman.create_parent('test.part_test', 'col3', 'time-static', 'daily');
 	_, err = db.NamedExec(`SELECT partman.create_parent(:table, :column, :type, :interval);`, db.Partitions[partitionName])
 	if err != nil {
-		log.Error("%v", err)
+		l.Error(err)
 	}
 }
 
 // Creates parents from all configured partitions for a database.
 func (db DB) CreateParents() {
 	if len(db.Partitions) == 0 {
-		log.Info("There are no configured partitions to be created.")
+		l.Info("There are no configured partitions to be created.")
 	}
 	for partitionName, _ := range db.Partitions {
 		db.CreateParent(partitionName)
@@ -46,7 +46,7 @@ func (db DB) RunMaintenance(partitionName string, analyze bool, jobmon bool) {
 		Jobmon:  jobmon,
 	})
 	if err != nil {
-		log.Error("%v", err)
+		l.Error(err)
 	}
 }
 
@@ -60,13 +60,13 @@ func (db DB) UndoPartition(partitionName string, batchCount int, dropTable bool,
 	m := map[string]interface{}{"table": db.Partitions[partitionName].Table, "batchCount": batchCount, "keepTable": keepTable, "jobmon": jobmon, "lockWait": lockWait}
 	_, err := db.NamedExec(`SELECT partman.undo_partition(:table, :batchCount, :keepTable, :jobmon, :lockWait);`, m)
 	if err != nil {
-		log.Error("%v", err)
+		l.Error(err)
 	}
 
 	// undo_partition() doesn't seem to remove the part_config record. It seems as if it should be removed too because a new partition on the same table can't be made until it is.
 	_, err = db.NamedExec(`DELETE FROM partman.part_config WHERE parent_table = :table;`, m)
 	if err != nil {
-		log.Error("%v", err)
+		l.Error(err)
 	}
 
 }
@@ -76,7 +76,7 @@ func (db DB) PartitionInfo(partitionName string) PartConfig {
 	p := PartConfig{}
 	err := db.Get(&p, "SELECT parent_table,control,type,part_interval,premake FROM partman.part_config WHERE parent_table = $1 LIMIT 1", db.Partitions[partitionName].Table)
 	if err != nil {
-		log.Error("%v", err)
+		l.Error(err)
 	}
 	return p
 }

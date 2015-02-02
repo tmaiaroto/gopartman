@@ -9,12 +9,16 @@
 
 package main
 
+import (
+	"log"
+)
+
 // Checks if the partition management schema exist in the database.
 func (db DB) sqlFunctionsExist() bool {
 	var count int
 	err := db.Get(&count, "SELECT COUNT(schema_name) FROM information_schema.schemata WHERE schema_name = 'partman';")
 	if err != nil {
-		log.Error("%v", err)
+		log.Printf("%v", err)
 		return false
 	}
 
@@ -28,7 +32,7 @@ func (db DB) loadPgPartman() {
 	// Everything is going under a partman schema.
 	_, err := db.Exec("CREATE SCHEMA IF NOT EXISTS partman;")
 	if err != nil {
-		log.Error("%v", err)
+		log.Printf("%v", err)
 	}
 
 	db.loadSqlTables()
@@ -40,7 +44,7 @@ func (db DB) loadPgPartman() {
 func (db DB) unloadPartman() {
 	_, err := db.Exec("DROP SCHEMA IF EXISTS partman CASCADE;")
 	if err != nil {
-		log.Error("%v", err)
+		log.Printf("%v", err)
 	}
 }
 
@@ -50,7 +54,7 @@ func (db DB) loadSqlTypes() {
 		CREATE TYPE partman.check_parent_table AS (parent_table text, count bigint);
 	`)
 	if err != nil {
-		log.Error("%v", err)
+		log.Printf("%v", err)
 	}
 }
 
@@ -59,7 +63,7 @@ func (db DB) loadSqlFunctions() {
 	var err error
 	tx, err := db.Begin()
 	if err != nil {
-		log.Error("%v", err)
+		log.Printf("%v", err)
 		return
 	}
 
@@ -266,7 +270,7 @@ func (db DB) loadSqlFunctions() {
 		$$;
 	`)
 	if err != nil {
-		log.Error("%v", err)
+		log.Printf("%v", err)
 	}
 
 	// apply_foreign_keys
@@ -390,7 +394,7 @@ func (db DB) loadSqlFunctions() {
 		$$;
 	`)
 	if err != nil {
-		log.Error("%v", err)
+		log.Printf("%v", err)
 	}
 
 	// check_name_length()
@@ -434,7 +438,7 @@ func (db DB) loadSqlFunctions() {
 		$$;
 	`)
 	if err != nil {
-		log.Error("%v", err)
+		log.Printf("%v", err)
 	}
 
 	// check_parent()
@@ -477,7 +481,7 @@ func (db DB) loadSqlFunctions() {
 		$$;
 	`)
 	if err != nil {
-		log.Error("%v", err)
+		log.Printf("%v", err)
 	}
 
 	// check_version()
@@ -518,7 +522,7 @@ func (db DB) loadSqlFunctions() {
 		$$;
 	`)
 	if err != nil {
-		log.Error("%v", err)
+		log.Printf("%v", err)
 	}
 
 	// create_function_id
@@ -790,7 +794,7 @@ func (db DB) loadSqlFunctions() {
 		$$;
 	`)
 	if err != nil {
-		log.Error("%v", err)
+		log.Printf("%v", err)
 	}
 
 	// create_function_time()
@@ -1049,7 +1053,7 @@ func (db DB) loadSqlFunctions() {
 		$$;
 	`)
 	if err != nil {
-		log.Error("%v", err)
+		log.Printf("%v", err)
 	}
 
 	// create_parent()
@@ -1532,7 +1536,7 @@ func (db DB) loadSqlFunctions() {
 	$$;
 	`)
 	if err != nil {
-		log.Error("%v", err)
+		log.Printf("%v", err)
 	}
 
 	// create_partition_id()
@@ -1796,7 +1800,7 @@ func (db DB) loadSqlFunctions() {
 		$$;
 	`)
 	if err != nil {
-		log.Error("%v", err)
+		log.Printf("%v", err)
 	}
 
 	// create_partition_time()
@@ -2136,7 +2140,7 @@ func (db DB) loadSqlFunctions() {
 		$$;
 	`)
 	if err != nil {
-		log.Error("%v", err)
+		log.Printf("%v", err)
 	}
 
 	// create_sub_parent()
@@ -2243,7 +2247,7 @@ func (db DB) loadSqlFunctions() {
 		$$;
 	`)
 	if err != nil {
-		log.Error("%v", err)
+		log.Printf("%v", err)
 	}
 
 	// create_trigger()
@@ -2275,7 +2279,7 @@ func (db DB) loadSqlFunctions() {
 		$$;
 	`)
 	if err != nil {
-		log.Error("%v", err)
+		log.Printf("%v", err)
 	}
 
 	// drop_constraints()
@@ -2385,7 +2389,7 @@ func (db DB) loadSqlFunctions() {
 		$$;
 	`)
 	if err != nil {
-		log.Error("%v", err)
+		log.Printf("%v", err)
 	}
 
 	// drop_partition_id()
@@ -2593,7 +2597,7 @@ func (db DB) loadSqlFunctions() {
 		$$;
 	`)
 	if err != nil {
-		log.Error("%v", err)
+		log.Printf("%v", err)
 	}
 
 	// drop_partition_time()
@@ -2822,7 +2826,7 @@ func (db DB) loadSqlFunctions() {
 		$$;
 	`)
 	if err != nil {
-		log.Error("%v", err)
+		log.Printf("%v", err)
 	}
 
 	// partition_data_id()
@@ -2954,7 +2958,7 @@ func (db DB) loadSqlFunctions() {
 		$$;
 	`)
 	if err != nil {
-		log.Error("%v", err)
+		log.Printf("%v", err)
 	}
 
 	// partition_data_time()
@@ -3161,7 +3165,7 @@ func (db DB) loadSqlFunctions() {
 		$$;
 	`)
 	if err != nil {
-		log.Error("%v", err)
+		log.Printf("%v", err)
 	}
 
 	// reapply_privileges()
@@ -3296,7 +3300,7 @@ func (db DB) loadSqlFunctions() {
 		$$;
 	`)
 	if err != nil {
-		log.Error("%v", err)
+		log.Printf("%v", err)
 	}
 
 	// run_maintenance()
@@ -3561,7 +3565,7 @@ func (db DB) loadSqlFunctions() {
 		$$;
 	`)
 	if err != nil {
-		log.Error("%v", err)
+		log.Printf("%v", err)
 	}
 
 	// show_partitions()
@@ -3619,7 +3623,7 @@ func (db DB) loadSqlFunctions() {
 		$$;
 	`)
 	if err != nil {
-		log.Error("%v", err)
+		log.Printf("%v", err)
 	}
 
 	// undo_partition()
@@ -3848,7 +3852,7 @@ func (db DB) loadSqlFunctions() {
 		$$;
 	`)
 	if err != nil {
-		log.Error("%v", err)
+		log.Printf("%v", err)
 	}
 
 	// undo_partition_id()
@@ -4119,7 +4123,7 @@ func (db DB) loadSqlFunctions() {
 		$$;
 	`)
 	if err != nil {
-		log.Error("%v", err)
+		log.Printf("%v", err)
 	}
 
 	// undo_partition_time()
@@ -4389,7 +4393,7 @@ func (db DB) loadSqlFunctions() {
 		$$;
 	`)
 	if err != nil {
-		log.Error("%v", err)
+		log.Printf("%v", err)
 	}
 
 	tx.Commit()
@@ -4400,7 +4404,7 @@ func (db DB) loadSqlTables() {
 	var err error
 	tx, err := db.Begin()
 	if err != nil {
-		log.Error("%v", err)
+		log.Printf("%v", err)
 		return
 	}
 
@@ -4506,7 +4510,7 @@ func (db DB) loadSqlTables() {
 		CHECK (partman.check_subpart_sameconfig(sub_parent));
 	`)
 	if err != nil {
-		log.Error("%v", err)
+		log.Printf("%v", err)
 	}
 
 	// 92/tables/tables.sql
@@ -4519,7 +4523,7 @@ func (db DB) loadSqlTables() {
 		CREATE INDEX custom_time_partitions_partition_range_idx ON partman.custom_time_partitions USING gist (partition_range);
 	`)
 	if err != nil {
-		log.Error("%v", err)
+		log.Printf("%v", err)
 	}
 
 	tx.Commit()

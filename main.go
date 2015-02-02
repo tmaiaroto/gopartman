@@ -1,13 +1,14 @@
 package main
 
 import (
+	"github.com/fatih/color"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
-	"github.com/op/go-logging"
 	"github.com/spf13/cobra"
 	"github.com/tmaiaroto/cron"
 	"gopkg.in/yaml.v2"
 	"io/ioutil"
+	"log"
 	"os"
 )
 
@@ -45,19 +46,6 @@ type GoPartManFlags struct {
 
 var flags = GoPartManFlags{}
 
-// Logging the pretty way.
-var log = logging.MustGetLogger("gopartmanLogger")
-var logFormat = logging.MustStringFormatter(
-	"%{color}[%{time:Jan/02/2006:15:04:05 -0700}] %{shortfile} %{level:.4s} %{id:03x}%{color:reset} %{message}",
-)
-
-// Never log out passwords from configuration.
-type Password string
-
-func (p Password) Redacted() interface{} {
-	return logging.Redact(string(p))
-}
-
 // The configuration holds everything necessary to manage partitions. Connection information, what to partition, and when.
 var cfg = GoPartManConfig{}
 
@@ -73,6 +61,12 @@ type Partition struct {
 	Type      string `json:"type" yaml:"type"`
 	Interval  string `json:"interval" yaml:"interval"`
 	Retention string `json:"retention" yaml:"retention"`
+	Options   struct {
+		DropTable  bool `json:"dropTable" yaml:"dropTable"`
+		LockWait   int  `json:"lockWait" yaml:"lockWait"`
+		Analyze    bool `json:"analyze" yaml:"analyze"`
+		BatchCount int  `json:"batchCount" yaml:"batchCount"`
+	} `json:"options" yaml:"optoins"`
 }
 
 type Server struct {
@@ -80,7 +74,7 @@ type Server struct {
 	Host       string               `json:"host" yaml:"host"`
 	Port       string               `json:"port" yaml:"port"`
 	User       string               `json:"user" yaml:"user"`
-	Password   Password             `json:"password" yaml:"password"`
+	Password   string               `json:"password" yaml:"password"`
 	Partitions map[string]Partition `json:"paritions" yaml:"partitions"`
 }
 
@@ -109,12 +103,40 @@ type DB struct {
 	Partitions map[string]Partition
 }
 
+// Logging (some functions always display output while others only if `verbose` was flagged)
+type logging struct {
+}
+
+// Global logging; l.Info(), l.Error() etc.
+var l = logging{}
+
+func (l logging) Info(msg interface{}) {
+	if flags.verbose {
+		log.Println(msg)
+	}
+}
+func (l logging) Debug(msg interface{}) {
+	if flags.verbose {
+		log.SetFlags(log.LstdFlags | log.Lshortfile)
+		log.Println(msg)
+	}
+}
+func (l logging) Critical(msg interface{}) {
+	log.Println(color.RedString("%v", msg))
+}
+func (l logging) Error(msg interface{}) {
+	log.Println(color.YellowString("%v", msg))
+}
+
+// Global job pool
+var c *cron.Cron
+
 // Set up the schedule.
 func newSchedule() {
-	c := cron.New()
+	c = cron.New()
 
-	//c.AddFunc("@hourly", func() { log.Info("Every hour") })
-	//c.AddFunc("0 5 * * * *", func() { log.Info("Every 5 minutes") }, "Optional name here. Useful when inspecting.")
+	//c.AddFunc("@hourly", func() { l.Info("Every hour") })
+	//c.AddFunc("0 5 * * * *", func() { l.Info("Every 5 minutes") }, "Optional name here. Useful when inspecting.")
 
 	c.Start()
 	cfg.Cron = c
@@ -126,15 +148,15 @@ func AddToSchedule() {
 
 func ListSchedule() {
 	for _, item := range cfg.Cron.Entries() {
-		log.Debug("%v", item.Name)
-		log.Debug("%v", item.Next)
+		l.Debug(item.Name)
+		l.Debug(item.Next)
 	}
 }
 
 func NewPostgresConnection(cfg Server) (DB, error) {
-	db, err := sqlx.Connect("postgres", "host="+cfg.Host+" port="+cfg.Port+" sslmode=disable  dbname="+cfg.Database+" user="+cfg.User+" password="+string(cfg.Password))
+	db, err := sqlx.Connect("postgres", "host="+cfg.Host+" port="+cfg.Port+" sslmode=disable  dbname="+cfg.Database+" user="+cfg.User+" password="+cfg.Password)
 	if err != nil {
-		log.Error("%v", err)
+		l.Error(err)
 	}
 	return DB{*db, cfg.Partitions}, err
 }
@@ -150,7 +172,7 @@ func NewFlaggedDb() DB {
 			Host:     flags.pgHost,
 			Port:     flags.pgPort,
 			User:     flags.pgUser,
-			Password: Password(flags.pgPassword),
+			Password: flags.pgPassword,
 			Partitions: map[string]Partition{
 				"flagged": Partition{
 					Table:     flags.partTable,
@@ -164,7 +186,7 @@ func NewFlaggedDb() DB {
 		// Of course close the connection when we're done in thise case
 		//defer flaggedDB.Close()
 		if err != nil {
-			log.Critical("There was a problem connecting to the Postgres database using the provided information.")
+			l.Critical("There was a problem connecting to the Postgres database using the provided information.")
 			panic(err)
 		}
 	}
@@ -202,17 +224,6 @@ func main() {
 
 	GoPartManCmd.Execute()
 
-	logBackend := logging.NewLogBackend(os.Stderr, "", 0)
-	logBackendFormatter := logging.NewBackendFormatter(logBackend, logFormat)
-	logBackendLeveled := logging.AddModuleLevel(logBackendFormatter)
-	// Critical messages will always output
-	logBackendLeveled.SetLevel(logging.CRITICAL, "")
-	// Verbose flag will show all log messages
-	if flags.verbose {
-		logBackendLeveled.SetLevel(logging.DEBUG, "")
-	}
-	logging.SetBackend(logBackendLeveled)
-
 	// Config based usage
 	cfgPath := "/etc/gopartman.yml"
 	if _, err := os.Stat(cfgPath); err != nil {
@@ -220,25 +231,26 @@ func main() {
 	}
 	b, err := ioutil.ReadFile(cfgPath)
 	if err != nil {
-		log.Critical("Configuration could not be loaded.")
+		l.Critical("Configuration could not be loaded.")
 		panic(err)
 	}
 
 	err = yaml.Unmarshal(b, &cfg)
 	if err != nil {
-		log.Critical("error: %v", err)
+		l.Critical(err)
 		panic(err)
 	}
-
-	//log.Info("%v", cfg.Servers)
 
 	// Set up all of the connections from the configuration and ensure they have the pg_partman schema, table, and functions loaded.
 	cfg.Connections = map[string]DB{}
 	for conn, credentials := range cfg.Servers {
-		cfg.Connections[conn], _ = NewPostgresConnection(credentials)
-
-		if !cfg.Connections[conn].sqlFunctionsExist() {
-			cfg.Connections[conn].loadPgPartman()
+		cfg.Connections[conn], err = NewPostgresConnection(credentials)
+		if err == nil {
+			if !cfg.Connections[conn].sqlFunctionsExist() {
+				cfg.Connections[conn].loadPgPartman()
+			}
+		} else {
+			l.Error(err)
 		}
 	}
 
