@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
 	"github.com/op/go-logging"
@@ -12,6 +11,7 @@ import (
 	"os"
 )
 
+// Version of gopartman
 const ver = "0.1.0"
 
 var GoPartManCmd = &cobra.Command{
@@ -36,80 +36,14 @@ type GoPartManFlags struct {
 	partType      string
 	partInterval  string
 	partRetention string
+	analyze       bool
+	lockWaitTime  int
+	batchCount    int
+	dropTable     bool
+	jobmon        bool
 }
 
 var flags = GoPartManFlags{}
-
-var versionCmd = &cobra.Command{
-	Use:   "version",
-	Short: "Print the version number of gopartman",
-	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("gopartman v" + ver)
-	},
-}
-
-// Installs the partman schema and its objects.
-var installPartmanCmd = &cobra.Command{
-	Use:   "install",
-	Short: "Installs pg_partman",
-	Long:  "\nInstalls pg_partman into a `partman` schema with its objects to manage partitions\n(Note: This is automatically installed, if not installed, when creating a partition).",
-	Run: func(cmd *cobra.Command, args []string) {
-		if !flaggedDB.sqlFunctionsExist() {
-			log.Info("Installing pg_partman on " + flags.pgDatabase)
-			flaggedDB.loadPgPartman()
-		} else {
-			log.Info("pg_partman has already been installed on " + flags.pgDatabase)
-		}
-	},
-}
-
-// Reinstalls the partman schema and its objects by first dropping the `partman` schema and then installing again.
-var reinstallPartmanCmd = &cobra.Command{
-	Use:   "reinstall",
-	Short: "Re-installs pg_partman",
-	Long:  "\nNote that re-installing pg_partman will drop the `partman` schema and all objects.\nSo any existing partitions on the database will cease to be managed.",
-	Run: func(cmd *cobra.Command, args []string) {
-		log.Info("Re-installing pg_artman on " + flags.pgDatabase)
-		flaggedDB.unloadPartman()
-		flaggedDB.loadPgPartman()
-	},
-}
-
-// Create a partition.
-var createParentCmd = &cobra.Command{
-	Use:   "create",
-	Short: "Creates a partition",
-	Long:  "\nCreates a partition for a given table. You must also pass a partition type and any other applicable options.\n(Note: This partition will require manual maintenance if the type is not `id-static` or `id-dynamic`)",
-	Run: func(cmd *cobra.Command, args []string) {
-		if !flaggedDB.sqlFunctionsExist() {
-			flaggedDB.loadPgPartman()
-		}
-
-		log.Info("Creating a partition on " + flags.pgDatabase + " for table " + flags.partTable)
-		flaggedDB.CreateParent("flagged")
-	},
-}
-
-// Runs maintenance on partitions.
-var runMaintenanceCmd = &cobra.Command{
-	Use:   "maintenance",
-	Short: "Runs maintenance on partitions",
-	Long:  "\nRuns maintenance on all tables if no table name was given. Maintenance includes adding new partition tables and removing old ones if a retention policy was set.",
-	Run: func(cmd *cobra.Command, args []string) {
-		if !flaggedDB.sqlFunctionsExist() {
-			log.Error("Error: pg_partman not installed. Please run the `install` command first.")
-			return
-		}
-
-		if flags.partTable != "" {
-			log.Info("Running maintenance on " + flags.pgDatabase + " for table " + flags.partTable)
-			flaggedDB.RunMaintenance(flags.partTable)
-		} else {
-			log.Info("Running maintenance on " + flags.pgDatabase + " for all tables")
-			flaggedDB.RunMaintenance("NULL")
-		}
-	},
-}
 
 // Logging the pretty way.
 var log = logging.MustGetLogger("gopartmanLogger")
@@ -194,16 +128,22 @@ func main() {
 	GoPartManCmd.PersistentFlags().BoolVarP(&flags.verbose, "verbose", "v", false, "verbose output")
 	GoPartManCmd.PersistentFlags().BoolVarP(&flags.daemon, "daemon", "m", false, "daemon mode")
 
-	GoPartManCmd.PersistentFlags().StringVarP(&flags.pgHost, "host", "a", "localhost", "host")
-	GoPartManCmd.PersistentFlags().StringVarP(&flags.pgPort, "port", "o", "5432", "port")
-	GoPartManCmd.PersistentFlags().StringVarP(&flags.pgUser, "user", "u", "", "user")
-	GoPartManCmd.PersistentFlags().StringVarP(&flags.pgPassword, "password", "p", "", "password")
-	GoPartManCmd.PersistentFlags().StringVarP(&flags.pgDatabase, "database", "d", "", "database")
-	GoPartManCmd.PersistentFlags().StringVarP(&flags.partTable, "table", "t", "", "partition table")
-	GoPartManCmd.PersistentFlags().StringVarP(&flags.partColumn, "column", "c", "created", "partition column")
-	GoPartManCmd.PersistentFlags().StringVarP(&flags.partType, "type", "y", "time", "partition type")
-	GoPartManCmd.PersistentFlags().StringVarP(&flags.partInterval, "interval", "i", "", "partition interval")
-	GoPartManCmd.PersistentFlags().StringVarP(&flags.partRetention, "retention", "r", "", "partition retention period")
+	GoPartManCmd.PersistentFlags().StringVarP(&flags.pgHost, "host", "s", "localhost", "Database host")
+	GoPartManCmd.PersistentFlags().StringVarP(&flags.pgPort, "port", "o", "5432", "Database port")
+	GoPartManCmd.PersistentFlags().StringVarP(&flags.pgUser, "user", "u", "", "Database user")
+	GoPartManCmd.PersistentFlags().StringVarP(&flags.pgPassword, "password", "p", "", "Database password")
+	GoPartManCmd.PersistentFlags().StringVarP(&flags.pgDatabase, "database", "d", "", "Database")
+	GoPartManCmd.PersistentFlags().StringVarP(&flags.partTable, "table", "t", "", "Parent table of the partition set.")
+	GoPartManCmd.PersistentFlags().StringVarP(&flags.partColumn, "column", "c", "created", "Partition column")
+	GoPartManCmd.PersistentFlags().StringVarP(&flags.partType, "type", "y", "time", `Type of partitioning. Valid values are "time" and "id". Not setting this argument will use undo_partition() and work on any parent/child table set.`)
+	GoPartManCmd.PersistentFlags().StringVarP(&flags.partInterval, "interval", "i", "", "Partition interval")
+	GoPartManCmd.PersistentFlags().StringVarP(&flags.partRetention, "retention", "r", "", "Partition retention period")
+
+	GoPartManCmd.PersistentFlags().BoolVarP(&flags.analyze, "analyze", "a", true, "Analyze is run on the parent to ensure statistics are updated for constraint exclusion.")
+	GoPartManCmd.PersistentFlags().IntVarP(&flags.lockWaitTime, "lockwait", "l", 0, "Have a lock timeout of this many seconds on the data move. If a lock is not obtained, that batch will be tried again.")
+	GoPartManCmd.PersistentFlags().IntVarP(&flags.batchCount, "batch", "b", 1, "How many times to loop through the value given for --interval. If --interval not set, will use default partition interval and undo at most -b partition(s).  Script commits at the end of each individual batch. (NOT passed as p_batch_count to undo function). If not set, all data will be moved to the parent table in a single run of the script.")
+	GoPartManCmd.PersistentFlags().BoolVarP(&flags.dropTable, "droptable", "x", false, "Switch setting for whether to drop child tables when they are empty. Do not set to just uninherit.")
+	GoPartManCmd.PersistentFlags().BoolVarP(&flags.jobmon, "jobmon", "j", true, "Use pg_jobmon")
 	GoPartManCmd.Execute()
 
 	var err error
@@ -238,6 +178,7 @@ func main() {
 	GoPartManCmd.AddCommand(reinstallPartmanCmd)
 	GoPartManCmd.AddCommand(createParentCmd)
 	GoPartManCmd.AddCommand(runMaintenanceCmd)
+	GoPartManCmd.AddCommand(undoPartitionCmd)
 	GoPartManCmd.Execute()
 
 	logBackend := logging.NewLogBackend(os.Stderr, "", 0)
