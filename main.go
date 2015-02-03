@@ -311,20 +311,62 @@ func main() {
 			panic(err)
 		}
 
+		// Create a schedule for jobs
+		newSchedule()
+
 		// Set up all of the connections from the configuration and ensure they have the pg_partman schema, table, and functions loaded.
 		cfg.Connections = map[string]DB{}
 		for conn, credentials := range cfg.Servers {
 			cfg.Connections[conn], err = NewPostgresConnection(credentials)
 			if err == nil {
+				// First make sure pg_partman is on each server
 				if !cfg.Connections[conn].sqlFunctionsExist() {
 					cfg.Connections[conn].loadPgPartman()
+				}
+				// Then create the partitions based on the config
+				cfg.Connections[conn].CreateParents()
+				// Then schedule maintenance for the partitions
+
+				for pName, p := range cfg.Connections[conn].Partitions {
+					jobName := pName + " " + p.Interval + " partition on " + p.Table + " table maintenance"
+					switch p.Interval {
+					case "quarter-hour", "half-hour":
+						c.AddFunc("@every 30m", func() {
+							cfg.Connections[conn].RunMaintenance(pName, true, true)
+						}, jobName)
+						break
+					case "hourly":
+						c.AddFunc("@hourly", func() {
+							cfg.Connections[conn].RunMaintenance(pName, true, true)
+						}, jobName)
+						break
+					case "daily":
+						c.AddFunc("@daily", func() {
+							cfg.Connections[conn].RunMaintenance(pName, true, true)
+						}, jobName)
+						break
+					case "weekly":
+						c.AddFunc("@weekly", func() {
+							cfg.Connections[conn].RunMaintenance(pName, true, true)
+						}, jobName)
+						break
+					case "monthly", "quarterly":
+						c.AddFunc("@monthly", func() {
+							cfg.Connections[conn].RunMaintenance(pName, true, true)
+						}, jobName)
+						break
+					case "yearly":
+						c.AddFunc("@yearly", func() {
+							cfg.Connections[conn].RunMaintenance(pName, true, true)
+						}, jobName)
+						break
+					}
+
 				}
 			} else {
 				l.Error(err)
 			}
 		}
-
-		newSchedule()
 
 		p := strconv.Itoa(cfg.Api.Port)
 		// But if it can't be parsed (maybe wasn't set) then just run the daemon without the API server.
