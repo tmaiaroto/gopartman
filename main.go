@@ -12,6 +12,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"reflect"
+	"runtime"
 	"strconv"
 )
 
@@ -242,9 +244,15 @@ func (bamw *BasicAuthMw) MiddlewareFunc(handler rest.HandlerFunc) rest.HandlerFu
 	}
 }
 
+// Response to handle an unauthorized, unauthenticated request
 func (bamw *BasicAuthMw) unauthorized(writer rest.ResponseWriter) {
 	writer.Header().Set("WWW-Authenticate", "Basic realm="+bamw.Realm)
 	rest.Error(writer, "Not Authorized", http.StatusUnauthorized)
+}
+
+// Helper function to get the name of a function (primarily used to show scheduled tasks)
+func getFunctionName(i interface{}) string {
+	return runtime.FuncForPC(reflect.ValueOf(i).Pointer()).Name()
 }
 
 func main() {
@@ -361,7 +369,8 @@ func main() {
 				PreRoutingMiddlewares:    restMiddleware,
 			}
 			err := handler.SetRoutes(
-			//&rest.Route{"GET", "/", HandleSomeRoute},
+				&rest.Route{"GET", "/partitions", showPartitions},
+				&rest.Route{"GET", "/schedule", showSchedule},
 			)
 			if err != nil {
 				log.Fatal(err)
