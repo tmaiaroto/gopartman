@@ -22,6 +22,9 @@ func (db DB) CreateParent(partitionName string) {
 	if err != nil {
 		l.Error(err)
 	}
+
+	// If a retention period was set, the record in partman.part_config table must be updated to include it. It does not get set with create_parent()
+	db.SetRetention(partitionName)
 }
 
 // Creates parents from all configured partitions for a database.
@@ -79,4 +82,48 @@ func (db DB) PartitionInfo(partitionName string) PartConfig {
 		l.Error(err)
 	}
 	return p
+}
+
+// Sets a retention period on a partition
+func (db DB) SetRetention(partitionName string) {
+	if db.Partitions[partitionName].Retention == "" {
+		l.Info("No retention period configured.")
+		return
+	}
+	var count int
+	err := db.Get(&count, "SELECT COUNT(*) FROM partman.part_config WHERE parent_table = $1", db.Partitions[partitionName].Table)
+	if err != nil {
+		l.Error(err)
+	}
+	// Make sure it exists.
+	if count > 0 {
+		m := map[string]interface{}{"table": db.Partitions[partitionName].Table, "retention": db.Partitions[partitionName].Retention}
+		_, err = db.NamedExec(`UPDATE partman.part_config SET retention = :retention WHERE parent_table = :table;`, m)
+		if err != nil {
+			l.Error(err)
+		} else {
+			l.Info("A retention period has been set for " + db.Partitions[partitionName].Table + ". Maintenance will remove old child partition tables.")
+		}
+	}
+}
+
+// Removes retention on a partition. Maintenance will no longer remove old child partition tables.
+func (db DB) RemoveRetention(partitionName string) {
+	var count int
+	err := db.Get(&count, "SELECT COUNT(*) FROM partman.part_config WHERE parent_table = $1", db.Partitions[partitionName].Table)
+	if err != nil {
+		l.Error(err)
+	}
+	// Make sure it exists.
+	if count > 0 {
+		m := map[string]interface{}{"table": db.Partitions[partitionName].Table, "retention": "NULL"}
+		_, err = db.NamedExec(`UPDATE partman.part_config SET retention = :retention WHERE parent_table = :table;`, m)
+		if err != nil {
+			l.Error(err)
+		} else {
+			l.Info("The retention period has been removed for " + db.Partitions[partitionName].Table + ".")
+		}
+	} else {
+		l.Info("There was no retention period set for " + db.Partitions[partitionName].Table + ".")
+	}
 }

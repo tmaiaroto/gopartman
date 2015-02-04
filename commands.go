@@ -181,3 +181,35 @@ var getPartitionInfoCmd = &cobra.Command{
 		table.Render()
 	},
 }
+
+// Set a retention period for a partition.
+var setPartitionRetentionCmd = &cobra.Command{
+	Use:   "set-retention",
+	Short: "Set a partition retention period",
+	Long:  "\nSets a retention period for a partition. Maintenance will now remove old child partition tables and the data within them.",
+	Run: func(cmd *cobra.Command, args []string) {
+		flaggedDB := NewFlaggedDb()
+		defer flaggedDB.Close()
+		if !flaggedDB.sqlFunctionsExist() {
+			flaggedDB.loadPgPartman()
+		}
+
+		flaggedDB.SetRetention("flagged")
+	},
+}
+
+// Removes a retention period for a partition.
+var removePartitionRetentionCmd = &cobra.Command{
+	Use:   "remove-retention",
+	Short: "Remove a partition retention period",
+	Long:  "\nRemoves a retention period for a partition. Maintenance will create new partition tables, but no tables or data will be removed.",
+	Run: func(cmd *cobra.Command, args []string) {
+		flaggedDB := NewFlaggedDb()
+		defer flaggedDB.Close()
+		if !flaggedDB.sqlFunctionsExist() {
+			flaggedDB.loadPgPartman()
+		}
+
+		flaggedDB.RemoveRetention("flagged")
+	},
+}

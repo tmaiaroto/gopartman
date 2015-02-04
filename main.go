@@ -79,6 +79,7 @@ type Partition struct {
 		Analyze    bool `json:"analyze" yaml:"analyze"`
 		BatchCount int  `json:"batchCount" yaml:"batchCount"`
 	} `json:"options" yaml:"optoins"`
+	MaintenanceJobId int64 `json:"maintenanceJobId" yaml:"maintenanceJobId"`
 }
 
 type Server struct {
@@ -283,6 +284,8 @@ func main() {
 	GoPartManCmd.AddCommand(runMaintenanceCmd)
 	GoPartManCmd.AddCommand(undoPartitionCmd)
 	GoPartManCmd.AddCommand(getPartitionInfoCmd)
+	GoPartManCmd.AddCommand(setPartitionRetentionCmd)
+	GoPartManCmd.AddCommand(removePartitionRetentionCmd)
 
 	GoPartManCmd.Execute()
 
@@ -331,34 +334,47 @@ func main() {
 					jobName := pName + " " + p.Interval + " partition on " + p.Table + " table maintenance"
 					switch p.Interval {
 					case "quarter-hour", "half-hour":
-						c.AddFunc("@every 30m", func() {
+						// setting a temporary "part" value as a work around for not being able to assign cfg.Connections[conn].Partitions[pName].MaintenanceJobId directly
+						part := cfg.Connections[conn].Partitions[pName]
+						part.MaintenanceJobId, _ = c.AddFunc("@every 30m", func() {
 							cfg.Connections[conn].RunMaintenance(pName, true, true)
 						}, jobName)
+						cfg.Connections[conn].Partitions[pName] = part
 						break
 					case "hourly":
-						c.AddFunc("@hourly", func() {
+						part := cfg.Connections[conn].Partitions[pName]
+						part.MaintenanceJobId, _ = c.AddFunc("@hourly", func() {
 							cfg.Connections[conn].RunMaintenance(pName, true, true)
 						}, jobName)
+						cfg.Connections[conn].Partitions[pName] = part
 						break
 					case "daily":
-						c.AddFunc("@daily", func() {
+						part := cfg.Connections[conn].Partitions[pName]
+						part.MaintenanceJobId, _ = c.AddFunc("@daily", func() {
 							cfg.Connections[conn].RunMaintenance(pName, true, true)
 						}, jobName)
+						cfg.Connections[conn].Partitions[pName] = part
 						break
 					case "weekly":
-						c.AddFunc("@weekly", func() {
+						part := cfg.Connections[conn].Partitions[pName]
+						part.MaintenanceJobId, _ = c.AddFunc("@weekly", func() {
 							cfg.Connections[conn].RunMaintenance(pName, true, true)
 						}, jobName)
+						cfg.Connections[conn].Partitions[pName] = part
 						break
 					case "monthly", "quarterly":
-						c.AddFunc("@monthly", func() {
+						part := cfg.Connections[conn].Partitions[pName]
+						part.MaintenanceJobId, _ = c.AddFunc("@monthly", func() {
 							cfg.Connections[conn].RunMaintenance(pName, true, true)
 						}, jobName)
+						cfg.Connections[conn].Partitions[pName] = part
 						break
 					case "yearly":
-						c.AddFunc("@yearly", func() {
+						part := cfg.Connections[conn].Partitions[pName]
+						part.MaintenanceJobId, _ = c.AddFunc("@yearly", func() {
 							cfg.Connections[conn].RunMaintenance(pName, true, true)
 						}, jobName)
+						cfg.Connections[conn].Partitions[pName] = part
 						break
 					}
 
