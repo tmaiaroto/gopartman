@@ -1,3 +1,13 @@
+// gopartman will manage Postgres partitions.
+//
+// - Partitions to be managed are defined in gopartman.yml
+// - Maintenance is regularly performed so there's no need to set any commands to run in a crontab or anything like that
+// - An API can optionally be configured to allow:
+// 		- CORS and Basic Auth settings for access to the API (configured in gopartman.yml)
+// 		- Changes to configuration
+// 		- Addition of new partitions
+// 		- Reporting with information about partition settings and state
+
 package main
 
 import (
@@ -18,7 +28,7 @@ import (
 )
 
 // Version of gopartman
-const ver = "0.1.0"
+const ver = "0.2.0"
 
 var GoPartManCmd = &cobra.Command{
 	Use:   "gopartman",
@@ -30,23 +40,10 @@ var GoPartManCmd = &cobra.Command{
 }
 
 type GoPartManFlags struct {
-	verbose       bool
-	daemon        bool
-	pgHost        string
-	pgUser        string
-	pgPassword    string
-	pgPort        string
-	pgDatabase    string
-	partTable     string
-	partColumn    string
-	partType      string
-	partInterval  string
-	partRetention string
-	analyze       bool
-	lockWaitTime  int
-	batchCount    int
-	dropTable     bool
-	jobmon        bool
+	verbose   bool
+	daemon    bool
+	server    string
+	partition string
 }
 
 var flags = GoPartManFlags{}
@@ -74,10 +71,14 @@ type Partition struct {
 	Interval  string `json:"interval" yaml:"interval"`
 	Retention string `json:"retention" yaml:"retention"`
 	Options   struct {
-		DropTable  bool `json:"dropTable" yaml:"dropTable"`
-		LockWait   int  `json:"lockWait" yaml:"lockWait"`
-		Analyze    bool `json:"analyze" yaml:"analyze"`
-		BatchCount int  `json:"batchCount" yaml:"batchCount"`
+		DropTableOnUndo      bool   `json:"dropTableOnUndo" yaml:"dropTableOnUndo"`
+		LockWait             int    `json:"lockWait" yaml:"lockWait"`
+		Analyze              bool   `json:"analyze" yaml:"analyze"`
+		BatchCount           int    `json:"batchCount" yaml:"batchCount"`
+		RetentionRemoveTable bool   `json:"retentionRemoveTable" yaml:"retentionRemoveTable"`
+		RetentionSchema      string `json:"retentionSchema" yaml:"retentionSchema"`
+		RetentionKeepIndex   bool   `json:"retentionKeepIndex" yaml:"retentionKeepIndex"`
+		Jobmon               bool   `json:"jobmon" yaml:"jobmon"`
 	} `json:"options" yaml:"optoins"`
 	MaintenanceJobId int64 `json:"maintenanceJobId" yaml:"maintenanceJobId"`
 }
@@ -174,38 +175,6 @@ func NewPostgresConnection(cfg Server) (DB, error) {
 	return DB{*db, cfg.Partitions}, err
 }
 
-// Retruns a connection to a database using information from flags (CLI only).
-func NewFlaggedDb() DB {
-	var flaggedDB DB
-	var err error
-	// Setup a new Postgres connection using information from flags (if present)
-	if flags.pgUser != "" && flags.pgDatabase != "" {
-		flaggedDB, err = NewPostgresConnection(Server{
-			Database: flags.pgDatabase,
-			Host:     flags.pgHost,
-			Port:     flags.pgPort,
-			User:     flags.pgUser,
-			Password: flags.pgPassword,
-			Partitions: map[string]Partition{
-				"flagged": Partition{
-					Table:     flags.partTable,
-					Column:    flags.partColumn,
-					Type:      flags.partType,
-					Interval:  flags.partInterval,
-					Retention: flags.partRetention,
-				},
-			},
-		})
-		// Of course close the connection when we're done in thise case
-		//defer flaggedDB.Close()
-		if err != nil {
-			l.Critical("There was a problem connecting to the Postgres database using the provided information.")
-			panic(err)
-		}
-	}
-	return flaggedDB
-}
-
 // --------- API Basic Auth Middleware (valid keys are defined in the gopartman.yml config, there are no roles or anything like that)
 type BasicAuthMw struct {
 	Realm string
@@ -259,25 +228,57 @@ func getFunctionName(i interface{}) string {
 func main() {
 	GoPartManCmd.AddCommand(versionCmd)
 	GoPartManCmd.PersistentFlags().BoolVarP(&flags.daemon, "daemon", "m", false, "daemon mode")
+	GoPartManCmd.PersistentFlags().StringVarP(&flags.server, "server", "s", "", "The configured server")
+	GoPartManCmd.PersistentFlags().StringVarP(&flags.partition, "partition", "p", "", "The configured partition")
 	GoPartManCmd.PersistentFlags().BoolVarP(&flags.verbose, "verbose", "v", false, "verbose output")
 
-	GoPartManCmd.PersistentFlags().StringVarP(&flags.pgHost, "host", "s", "localhost", "Database host")
-	GoPartManCmd.PersistentFlags().StringVarP(&flags.pgPort, "port", "o", "5432", "Database port")
-	GoPartManCmd.PersistentFlags().StringVarP(&flags.pgUser, "user", "u", "", "Database user")
-	GoPartManCmd.PersistentFlags().StringVarP(&flags.pgPassword, "password", "p", "", "Database password")
-	GoPartManCmd.PersistentFlags().StringVarP(&flags.pgDatabase, "database", "d", "", "Database")
-	GoPartManCmd.PersistentFlags().StringVarP(&flags.partTable, "table", "t", "", "Parent table of the partition set.")
-	GoPartManCmd.PersistentFlags().StringVarP(&flags.partColumn, "column", "c", "created", "Partition column")
-	GoPartManCmd.PersistentFlags().StringVarP(&flags.partType, "type", "y", "time", `Type of partitioning. Valid values are "time" and "id". Not setting this argument will use undo_partition() and work on any parent/child table set.`)
-	GoPartManCmd.PersistentFlags().StringVarP(&flags.partInterval, "interval", "i", "", "Partition interval")
-	GoPartManCmd.PersistentFlags().StringVarP(&flags.partRetention, "retention", "r", "", "Partition retention period")
+	// Load the configured partitions
+	cfgPath := "/etc/gopartman.yml"
+	if _, err := os.Stat(cfgPath); err != nil {
+		cfgPath = "./gopartman.yml"
+	}
+	b, err := ioutil.ReadFile(cfgPath)
+	if err != nil {
+		l.Critical("Configuration could not be loaded.")
+		panic(err)
+	}
 
-	GoPartManCmd.PersistentFlags().BoolVarP(&flags.analyze, "analyze", "a", true, "Analyze is run on the parent to ensure statistics are updated for constraint exclusion.")
-	GoPartManCmd.PersistentFlags().IntVarP(&flags.lockWaitTime, "lockwait", "l", 0, "Have a lock timeout of this many seconds on the data move. If a lock is not obtained, that batch will be tried again.")
-	GoPartManCmd.PersistentFlags().IntVarP(&flags.batchCount, "batch", "b", 1, "How many times to loop through the value given for --interval. If --interval not set, will use default partition interval and undo at most -b partition(s).  Script commits at the end of each individual batch. (NOT passed as p_batch_count to undo function). If not set, all data will be moved to the parent table in a single run of the script.")
-	GoPartManCmd.PersistentFlags().BoolVarP(&flags.dropTable, "droptable", "x", false, "Switch setting for whether to drop child tables when they are empty. Do not set to just uninherit.")
-	GoPartManCmd.PersistentFlags().BoolVarP(&flags.jobmon, "jobmon", "j", true, "Use pg_jobmon")
+	err = yaml.Unmarshal(b, &cfg)
+	if err != nil {
+		l.Critical(err)
+		panic(err)
+	}
 
+	// Set up all of the connections from the configuration and ensure they have the pg_partman schema, table, and functions loaded.
+	cfg.Connections = map[string]DB{}
+	for conn, credentials := range cfg.Servers {
+		cfg.Connections[conn], err = NewPostgresConnection(credentials)
+		if err == nil {
+			// Set some defaults from the config for partitions
+			for pName, _ := range cfg.Connections[conn].Partitions {
+				part := cfg.Connections[conn].Partitions[pName]
+
+				// If not set in the YML, Go will make this the empty value, 0. Even if a user set this value to 0, that's not a valid value in any use of this option.
+				// So set it to 1 if 0 or less than 0 (erronous user input).
+				if part.Options.BatchCount <= 0 {
+					part.Options.BatchCount = 1
+				}
+
+				cfg.Connections[conn].Partitions[pName] = part
+			}
+
+			// First make sure pg_partman is on each server
+			if !cfg.Connections[conn].sqlFunctionsExist() {
+				cfg.Connections[conn].loadPgPartman()
+			}
+			// Then create the partitions based on the config
+			cfg.Connections[conn].CreateParents()
+		} else {
+			l.Error(err)
+		}
+	}
+
+	// Add commands after partitions are configured
 	GoPartManCmd.AddCommand(installPartmanCmd)
 	GoPartManCmd.AddCommand(reinstallPartmanCmd)
 	GoPartManCmd.AddCommand(createParentCmd)
@@ -289,98 +290,64 @@ func main() {
 
 	GoPartManCmd.Execute()
 
-	// Config based usage available if running forever as a daemon. In this mode, the following happens:
-	// - Partitions to be managed are defined in gopartman.yml
-	// - Maintenance is regularly performed so there's no need to set any commands to run in a crontab or anything like that
-	// - An API can optionally be configured to allow:
-	// 		- CORS and Basic Auth settings for access to the API (configured in gopartman.yml)
-	// 		- Changes to configuration
-	// 		- Addition of new partitions
-	// 		- Reporting with information about partition settings and state
+	// Notify, but keep running because it is possible that partitions will be added later via the API.
+	if len(cfg.Connections) == 0 {
+		l.Info("No configured partitions.")
+	}
+
+	// Then schedule maintenance for the partitions and optionally start API server if running forever
 	if flags.daemon {
-		cfgPath := "/etc/gopartman.yml"
-		if _, err := os.Stat(cfgPath); err != nil {
-			cfgPath = "./gopartman.yml"
-		}
-		b, err := ioutil.ReadFile(cfgPath)
-		if err != nil {
-			l.Critical("Configuration could not be loaded.")
-			panic(err)
-		}
-
-		err = yaml.Unmarshal(b, &cfg)
-		if err != nil {
-			l.Critical(err)
-			panic(err)
-		}
-
 		// Create a schedule for jobs
 		newSchedule()
 
-		// Set up all of the connections from the configuration and ensure they have the pg_partman schema, table, and functions loaded.
-		cfg.Connections = map[string]DB{}
-		for conn, credentials := range cfg.Servers {
-			cfg.Connections[conn], err = NewPostgresConnection(credentials)
-			if err == nil {
-				// First make sure pg_partman is on each server
-				if !cfg.Connections[conn].sqlFunctionsExist() {
-					cfg.Connections[conn].loadPgPartman()
+		for conn, _ := range cfg.Servers {
+			for pName, p := range cfg.Connections[conn].Partitions {
+				jobName := pName + " " + p.Interval + " partition on " + p.Table + " table maintenance"
+				switch p.Interval {
+				case "quarter-hour", "half-hour":
+					// setting a temporary "part" value as a work around for not being able to assign cfg.Connections[conn].Partitions[pName].MaintenanceJobId directly
+					part := cfg.Connections[conn].Partitions[pName]
+					part.MaintenanceJobId, _ = c.AddFunc("@every 30m", func() {
+						cfg.Connections[conn].RunMaintenance(pName, true, true)
+					}, jobName)
+					cfg.Connections[conn].Partitions[pName] = part
+					break
+				case "hourly":
+					part := cfg.Connections[conn].Partitions[pName]
+					part.MaintenanceJobId, _ = c.AddFunc("@hourly", func() {
+						cfg.Connections[conn].RunMaintenance(pName, true, true)
+					}, jobName)
+					cfg.Connections[conn].Partitions[pName] = part
+					break
+				case "daily":
+					part := cfg.Connections[conn].Partitions[pName]
+					part.MaintenanceJobId, _ = c.AddFunc("@daily", func() {
+						cfg.Connections[conn].RunMaintenance(pName, true, true)
+					}, jobName)
+					cfg.Connections[conn].Partitions[pName] = part
+					break
+				case "weekly":
+					part := cfg.Connections[conn].Partitions[pName]
+					part.MaintenanceJobId, _ = c.AddFunc("@weekly", func() {
+						cfg.Connections[conn].RunMaintenance(pName, true, true)
+					}, jobName)
+					cfg.Connections[conn].Partitions[pName] = part
+					break
+				case "monthly", "quarterly":
+					part := cfg.Connections[conn].Partitions[pName]
+					part.MaintenanceJobId, _ = c.AddFunc("@monthly", func() {
+						cfg.Connections[conn].RunMaintenance(pName, true, true)
+					}, jobName)
+					cfg.Connections[conn].Partitions[pName] = part
+					break
+				case "yearly":
+					part := cfg.Connections[conn].Partitions[pName]
+					part.MaintenanceJobId, _ = c.AddFunc("@yearly", func() {
+						cfg.Connections[conn].RunMaintenance(pName, true, true)
+					}, jobName)
+					cfg.Connections[conn].Partitions[pName] = part
+					break
 				}
-				// Then create the partitions based on the config
-				cfg.Connections[conn].CreateParents()
-				// Then schedule maintenance for the partitions
-
-				for pName, p := range cfg.Connections[conn].Partitions {
-					jobName := pName + " " + p.Interval + " partition on " + p.Table + " table maintenance"
-					switch p.Interval {
-					case "quarter-hour", "half-hour":
-						// setting a temporary "part" value as a work around for not being able to assign cfg.Connections[conn].Partitions[pName].MaintenanceJobId directly
-						part := cfg.Connections[conn].Partitions[pName]
-						part.MaintenanceJobId, _ = c.AddFunc("@every 30m", func() {
-							cfg.Connections[conn].RunMaintenance(pName, true, true)
-						}, jobName)
-						cfg.Connections[conn].Partitions[pName] = part
-						break
-					case "hourly":
-						part := cfg.Connections[conn].Partitions[pName]
-						part.MaintenanceJobId, _ = c.AddFunc("@hourly", func() {
-							cfg.Connections[conn].RunMaintenance(pName, true, true)
-						}, jobName)
-						cfg.Connections[conn].Partitions[pName] = part
-						break
-					case "daily":
-						part := cfg.Connections[conn].Partitions[pName]
-						part.MaintenanceJobId, _ = c.AddFunc("@daily", func() {
-							cfg.Connections[conn].RunMaintenance(pName, true, true)
-						}, jobName)
-						cfg.Connections[conn].Partitions[pName] = part
-						break
-					case "weekly":
-						part := cfg.Connections[conn].Partitions[pName]
-						part.MaintenanceJobId, _ = c.AddFunc("@weekly", func() {
-							cfg.Connections[conn].RunMaintenance(pName, true, true)
-						}, jobName)
-						cfg.Connections[conn].Partitions[pName] = part
-						break
-					case "monthly", "quarterly":
-						part := cfg.Connections[conn].Partitions[pName]
-						part.MaintenanceJobId, _ = c.AddFunc("@monthly", func() {
-							cfg.Connections[conn].RunMaintenance(pName, true, true)
-						}, jobName)
-						cfg.Connections[conn].Partitions[pName] = part
-						break
-					case "yearly":
-						part := cfg.Connections[conn].Partitions[pName]
-						part.MaintenanceJobId, _ = c.AddFunc("@yearly", func() {
-							cfg.Connections[conn].RunMaintenance(pName, true, true)
-						}, jobName)
-						cfg.Connections[conn].Partitions[pName] = part
-						break
-					}
-
-				}
-			} else {
-				l.Error(err)
 			}
 		}
 

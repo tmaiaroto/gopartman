@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"github.com/fatih/color"
 	"github.com/olekukonko/tablewriter"
@@ -8,6 +9,19 @@ import (
 	"os"
 	"strconv"
 )
+
+// Checks to see if the server and partition passed from the command line has actually been configured and returns it if so.
+func getFlaggedPartition() (*DB, *Partition, error) {
+	var err error
+	if sVal, ok := cfg.Connections[flags.server]; ok {
+		if pVal, ok := cfg.Connections[flags.server].Partitions[flags.partition]; ok {
+			err = nil
+			return &sVal, &pVal, err
+		}
+	}
+	err = errors.New("that partition does not seem to be configured in gopartman.yml")
+	return &DB{}, &Partition{}, err
+}
 
 var versionCmd = &cobra.Command{
 	Use:   "version",
@@ -23,13 +37,17 @@ var installPartmanCmd = &cobra.Command{
 	Short: "Installs pg_partman",
 	Long:  "\nInstalls pg_partman into a `partman` schema with its objects to manage partitions\n(Note: This is automatically installed, if not installed, when creating a partition).",
 	Run: func(cmd *cobra.Command, args []string) {
-		flaggedDB := NewFlaggedDb()
-		defer flaggedDB.Close()
-		if !flaggedDB.sqlFunctionsExist() {
-			l.Info("Installing pg_partman on " + flags.pgDatabase)
-			flaggedDB.loadPgPartman()
+		fServer, _, err := getFlaggedPartition()
+		if err != nil {
+			l.Critical(err)
+			return
+		}
+
+		if !fServer.sqlFunctionsExist() {
+			l.Info("Installing pg_partman on " + flags.server)
+			fServer.loadPgPartman()
 		} else {
-			l.Info("pg_partman has already been installed on " + flags.pgDatabase)
+			l.Info("pg_partman has already been installed on " + flags.server)
 		}
 	},
 }
@@ -40,11 +58,14 @@ var reinstallPartmanCmd = &cobra.Command{
 	Short: "Re-installs pg_partman",
 	Long:  "\nNote that re-installing pg_partman will drop the `partman` schema and all objects.\nSo any existing partitions on the database will cease to be managed.",
 	Run: func(cmd *cobra.Command, args []string) {
-		flaggedDB := NewFlaggedDb()
-		defer flaggedDB.Close()
-		l.Info("Re-installing pg_partman on " + flags.pgDatabase)
-		flaggedDB.unloadPartman()
-		flaggedDB.loadPgPartman()
+		fServer, _, err := getFlaggedPartition()
+		if err != nil {
+			l.Critical(err)
+			return
+		}
+		l.Info("Re-installing pg_partman on " + flags.server)
+		fServer.unloadPartman()
+		fServer.loadPgPartman()
 	},
 }
 
@@ -114,14 +135,17 @@ var createParentCmd = &cobra.Command{
 	Any new data will now be stored in an available partition (if one does not exist, it will be stored in the parent table).
 	`,
 	Run: func(cmd *cobra.Command, args []string) {
-		flaggedDB := NewFlaggedDb()
-		defer flaggedDB.Close()
-		if !flaggedDB.sqlFunctionsExist() {
-			flaggedDB.loadPgPartman()
+		fServer, fPartition, err := getFlaggedPartition()
+		if err != nil {
+			l.Critical(err)
+			return
+		}
+		if !fServer.sqlFunctionsExist() {
+			fServer.loadPgPartman()
 		}
 
-		l.Info("Creating a partition on " + flags.pgDatabase + " for table " + flags.partTable)
-		flaggedDB.CreateParent("flagged")
+		l.Info("Creating a partition on " + flags.server + " for table " + flags.partition)
+		fServer.CreateParent(fPartition)
 	},
 }
 
@@ -131,20 +155,24 @@ var runMaintenanceCmd = &cobra.Command{
 	Short: "Runs maintenance on partitions",
 	Long:  "\nRuns maintenance on all tables if no table name was given. Maintenance includes adding new partition tables and removing old ones if a retention policy was set.",
 	Run: func(cmd *cobra.Command, args []string) {
-		flaggedDB := NewFlaggedDb()
-		defer flaggedDB.Close()
-		if !flaggedDB.sqlFunctionsExist() {
+		fServer, _, err := getFlaggedPartition()
+		if err != nil {
+			l.Critical(err)
+			return
+		}
+
+		if !fServer.sqlFunctionsExist() {
 			l.Error("Error: pg_partman not installed. Please run the `install` command first.")
 			return
 		}
 
-		if flags.partTable != "" {
-			l.Info("Running maintenance on " + flags.pgDatabase + " for table " + flags.partTable)
-			flaggedDB.RunMaintenance("flagged", flags.analyze, flags.jobmon)
-		} else {
-			l.Info("Running maintenance on " + flags.pgDatabase + " for all tables")
-			flaggedDB.RunMaintenance("NULL", flags.analyze, flags.jobmon)
-		}
+		// if flags.partTable != "" {
+		// 	l.Info("Running maintenance on " + flags.pgDatabase + " for table " + flags.partTable)
+		// 	flaggedDB.RunMaintenance("flagged", flags.analyze, flags.jobmon)
+		// } else {
+		// 	l.Info("Running maintenance on " + flags.pgDatabase + " for all tables")
+		// 	flaggedDB.RunMaintenance("NULL", flags.analyze, flags.jobmon)
+		// }
 	},
 }
 
@@ -154,14 +182,17 @@ var undoPartitionCmd = &cobra.Command{
 	Short: "Undo a partition",
 	Long:  "\nReverts a partition back to only using its parent table.",
 	Run: func(cmd *cobra.Command, args []string) {
-		flaggedDB := NewFlaggedDb()
-		defer flaggedDB.Close()
-		if !flaggedDB.sqlFunctionsExist() {
-			flaggedDB.loadPgPartman()
+		fServer, fPartition, err := getFlaggedPartition()
+		if err != nil {
+			l.Critical(err)
+			return
 		}
 
-		l.Info("Reverting a partition on " + flags.pgDatabase + " for table " + flags.partTable)
-		flaggedDB.UndoPartition("flagged", flags.batchCount, flags.dropTable, flags.jobmon, flags.lockWaitTime)
+		if !fServer.sqlFunctionsExist() {
+			fServer.loadPgPartman()
+		}
+		l.Info("Reverting a partition on " + flags.server + " for table " + flags.partition)
+		fServer.UndoPartition(fPartition)
 	},
 }
 
@@ -171,10 +202,13 @@ var getPartitionInfoCmd = &cobra.Command{
 	Short: "Info about a partition",
 	Long:  "\nDisplays information about a partition given its parent table.",
 	Run: func(cmd *cobra.Command, args []string) {
-		flaggedDB := NewFlaggedDb()
-		defer flaggedDB.Close()
-		info := flaggedDB.PartitionInfo("flagged")
+		fServer, fPartition, err := getFlaggedPartition()
+		if err != nil {
+			l.Critical(err)
+			return
+		}
 
+		info := fServer.PartitionInfo(fPartition)
 		table := tablewriter.NewWriter(os.Stdout)
 		table.SetHeader([]string{"Table", "Control Column", "Type", "Interval", "# of Tables to Premake"})
 		table.Append([]string{info.ParentTable, info.Control, info.Type, info.PartInterval, strconv.Itoa(info.Premake)})
@@ -188,13 +222,16 @@ var setPartitionRetentionCmd = &cobra.Command{
 	Short: "Set a partition retention period",
 	Long:  "\nSets a retention period for a partition. Maintenance will now remove old child partition tables and the data within them.",
 	Run: func(cmd *cobra.Command, args []string) {
-		flaggedDB := NewFlaggedDb()
-		defer flaggedDB.Close()
-		if !flaggedDB.sqlFunctionsExist() {
-			flaggedDB.loadPgPartman()
+		fServer, fPartition, err := getFlaggedPartition()
+		if err != nil {
+			l.Critical(err)
+			return
+		}
+		if !fServer.sqlFunctionsExist() {
+			fServer.loadPgPartman()
 		}
 
-		flaggedDB.SetRetention("flagged")
+		fServer.SetRetention(fPartition)
 	},
 }
 
@@ -204,12 +241,15 @@ var removePartitionRetentionCmd = &cobra.Command{
 	Short: "Remove a partition retention period",
 	Long:  "\nRemoves a retention period for a partition. Maintenance will create new partition tables, but no tables or data will be removed.",
 	Run: func(cmd *cobra.Command, args []string) {
-		flaggedDB := NewFlaggedDb()
-		defer flaggedDB.Close()
-		if !flaggedDB.sqlFunctionsExist() {
-			flaggedDB.loadPgPartman()
+		fServer, fPartition, err := getFlaggedPartition()
+		if err != nil {
+			l.Critical(err)
+			return
+		}
+		if !fServer.sqlFunctionsExist() {
+			fServer.loadPgPartman()
 		}
 
-		flaggedDB.RemoveRetention("flagged")
+		fServer.RemoveRetention(fPartition)
 	},
 }
