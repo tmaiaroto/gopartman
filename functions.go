@@ -140,21 +140,107 @@ func (db DB) RemoveRetention(p *Partition) {
 
 // For time based partitions, this fixes/cleans up partitions which may have accidentally had data written to the parent table. Or, maybe it was data before the partition was created.
 func (db DB) PartitionDataTime(p *Partition) {
-	//partition_data_time(p_parent_table text, p_batch_count int DEFAULT 1, p_batch_interval interval DEFAULT NULL, p_lock_wait numeric DEFAULT 0, p_order text DEFAULT 'ASC')
+	var count int
+	err := db.Get(&count, "SELECT COUNT(*) FROM partman.part_config WHERE parent_table = $1", p.Table)
+	if err != nil {
+		l.Error(err)
+	}
+	// Make sure it exists.
+	if count > 0 {
+		m := map[string]interface{}{"table": p.Table, "batchCount": p.Options.BatchCount, "interval": p.Options.BatchInterval, "lockWait": p.Options.LockWait, "order": p.Options.MigrationOrder}
+		_, err = db.NamedExec(`SELECT partman.partition_data_time(:table, :batchCount, :interval, :lockWait, :order);`, m)
+		if err != nil {
+			l.Error(err)
+		} else {
+			l.Info("The partition on " + p.Table + " has been cleaned up. Any data written to the parent has now been moved to child partition tables (if they were available).")
+		}
+	} else {
+		l.Info("There appears to be no partition set for " + p.Table + ".")
+	}
 }
 
 // For id based partitions, this fixes/cleans up partitions which may have accidentally had data written to the parent table. Or, maybe it was data before the partition was created.
 func (db DB) PartitionDataId(p *Partition) {
-	//partition_data_id(p_parent_table text, p_batch_count int DEFAULT 1, p_batch_interval int DEFAULT NULL, p_lock_wait numeric DEFAULT 0)
+	var count int
+	err := db.Get(&count, "SELECT COUNT(*) FROM partman.part_config WHERE parent_table = $1", p.Table)
+	if err != nil {
+		l.Error(err)
+	}
+	// Make sure it exists.
+	if count > 0 {
+		m := map[string]interface{}{"table": p.Table, "batchCount": p.Options.BatchCount, "interval": p.Options.BatchInterval, "lockWait": p.Options.LockWait}
+		_, err = db.NamedExec(`SELECT partman.partition_data_id(:table, :batchCount, :interval, :lockWait);`, m)
+		if err != nil {
+			l.Error(err)
+		} else {
+			l.Info("The partition on " + p.Table + " has been cleaned up. Any data written to the parent has now been moved to child partition tables (if they were available).")
+		}
+	} else {
+		l.Info("There appears to be no partition set for " + p.Table + ".")
+	}
 }
 
-// Manually uninherits (and optionally drops) a child partition table from a time based partition set.
+// Manually uninherits (and optionally drops) child partition tables from a time based partition set.
 func (db DB) DropPartitionTime(p *Partition) {
 	//drop_partition_time(p_parent_table text, p_retention interval DEFAULT NULL, p_keep_table boolean DEFAULT NULL, p_keep_index boolean DEFAULT NULL, p_retention_schema text DEFAULT NULL) RETURNS int
 	//This function is used to drop child tables from a time-based partition set. By default, the table is just uninherited and not actually dropped. For automatically dropping old tables, it is recommended to use the run_maintenance() function with retention configured instead of calling this directly.
+	var count int
+	err := db.Get(&count, "SELECT COUNT(*) FROM partman.part_config WHERE parent_table = $1", p.Table)
+	if err != nil {
+		l.Error(err)
+	}
+
+	keepTable := true
+	if p.Options.DropTableOnUninherit {
+		keepTable = false
+	}
+	keepIndex := true
+	if p.Options.DropIndexOnUninherit {
+		keepIndex = false
+	}
+
+	// Make sure it exists.
+	if count > 0 {
+		m := map[string]interface{}{"table": p.Table, "interval": p.Interval, "keepTable": keepTable, "keepIndex": keepIndex, "retentionSchema": p.Options.RetentionSchema}
+		_, err = db.NamedExec(`SELECT partman.drop_partition_time(:table, :interval, :keepTable, :keepIndex, :retentionSchema);`, m)
+		if err != nil {
+			l.Error(err)
+		} else {
+			l.Info("The partition on " + p.Table + " has been dropped.")
+		}
+	} else {
+		l.Info("There appears to be no partition set for " + p.Table + ".")
+	}
 }
 
 // Manually uninherits (and optionally drops) a child partition table from an id based partition set.
 func (db DB) DropPartitionId(p *Partition) {
 	//drop_partition_id(p_parent_table text, p_retention bigint DEFAULT NULL, p_keep_table boolean DEFAULT NULL, p_keep_index boolean DEFAULT NULL, p_retention_schema text DEFAULT NULL) RETURNS int
+	var count int
+	err := db.Get(&count, "SELECT COUNT(*) FROM partman.part_config WHERE parent_table = $1", p.Table)
+	if err != nil {
+		l.Error(err)
+	}
+
+	keepTable := true
+	if p.Options.DropTableOnUninherit {
+		keepTable = false
+	}
+	keepIndex := true
+	if p.Options.DropIndexOnUninherit {
+		keepIndex = false
+	}
+
+	// Make sure it exists.
+	if count > 0 {
+		m := map[string]interface{}{"table": p.Table, "retentionId": p.Options.DropIdOlderThanOnUninherit, "keepTable": keepTable, "keepIndex": keepIndex, "retentionSchema": p.Options.RetentionSchema}
+		_, err = db.NamedExec(`SELECT partman.drop_partition_time(:table, :retentionId, :keepTable, :keepIndex, :retentionSchema);`, m)
+		if err != nil {
+			l.Error(err)
+		} else {
+			l.Info("The partition on " + p.Table + " has been dropped.")
+		}
+	} else {
+		l.Info("There appears to be no partition set for " + p.Table + ".")
+	}
 }

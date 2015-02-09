@@ -40,10 +40,11 @@ var GoPartManCmd = &cobra.Command{
 }
 
 type GoPartManFlags struct {
-	verbose   bool
-	daemon    bool
-	server    string
-	partition string
+	verbose    bool
+	daemon     bool
+	server     string
+	partition  string
+	configFile string
 }
 
 var flags = GoPartManFlags{}
@@ -71,14 +72,19 @@ type Partition struct {
 	Interval  string `json:"interval" yaml:"interval"`
 	Retention string `json:"retention" yaml:"retention"`
 	Options   struct {
-		DropTableOnUndo      bool   `json:"dropTableOnUndo" yaml:"dropTableOnUndo"`
-		LockWait             int    `json:"lockWait" yaml:"lockWait"`
-		Analyze              bool   `json:"analyze" yaml:"analyze"`
-		BatchCount           int    `json:"batchCount" yaml:"batchCount"`
-		RetentionRemoveTable bool   `json:"retentionRemoveTable" yaml:"retentionRemoveTable"`
-		RetentionSchema      string `json:"retentionSchema" yaml:"retentionSchema"`
-		RetentionKeepIndex   bool   `json:"retentionKeepIndex" yaml:"retentionKeepIndex"`
-		Jobmon               bool   `json:"jobmon" yaml:"jobmon"`
+		DropTableOnUndo            bool   `json:"dropTableOnUndo" yaml:"dropTableOnUndo"`
+		DropTableOnUninherit       bool   `json:"dropTableOnUninherit" yaml:"dropTableOnUninherit"`
+		DropIndexOnUninherit       bool   `json:"dropIndexOnUninherit" yaml:"dropIndexOnUninherit"`
+		DropIdOlderThanOnUninherit int    `json:"dropIdOlderThan" yaml:"dropIdOlderThan"`
+		LockWait                   int    `json:"lockWait" yaml:"lockWait"`
+		Analyze                    bool   `json:"analyze" yaml:"analyze"`
+		BatchCount                 int    `json:"batchCount" yaml:"batchCount"`
+		BatchInterval              string `json:"batchInterval" yaml:"batchInterval"`
+		MigrationOrder             string `json:"migrationOrder" yaml:"migrationOrder"`
+		RetentionRemoveTable       bool   `json:"retentionRemoveTable" yaml:"retentionRemoveTable"`
+		RetentionSchema            string `json:"retentionSchema" yaml:"retentionSchema"`
+		RetentionKeepIndex         bool   `json:"retentionKeepIndex" yaml:"retentionKeepIndex"`
+		Jobmon                     bool   `json:"jobmon" yaml:"jobmon"`
 	} `json:"options" yaml:"optoins"`
 	MaintenanceJobId int64 `json:"maintenanceJobId" yaml:"maintenanceJobId"`
 }
@@ -148,23 +154,8 @@ var c *cron.Cron
 // Set up the schedule.
 func newSchedule() {
 	c = cron.New()
-
-	//c.AddFunc("@hourly", func() { l.Info("Every hour") })
-	//c.AddFunc("0 5 * * * *", func() { l.Info("Every 5 minutes") }, "Optional name here. Useful when inspecting.")
-
 	c.Start()
 	cfg.Cron = c
-}
-
-func AddToSchedule() {
-
-}
-
-func ListSchedule() {
-	for _, item := range cfg.Cron.Entries() {
-		l.Debug(item.Name)
-		l.Debug(item.Next)
-	}
 }
 
 func NewPostgresConnection(cfg Server) (DB, error) {
@@ -225,9 +216,29 @@ func getFunctionName(i interface{}) string {
 	return runtime.FuncForPC(reflect.ValueOf(i).Pointer()).Name()
 }
 
+// Sets some default values for a partition struct.
+func NewPartitionDefaults(part Partition) Partition {
+	// If not set in the YML (or when making a new struct), Go will make this the empty value, 0.
+	// Even if a user set this value to 0, that's not a valid value in any use of this option.
+	// So set it to 1 if 0 or less than 0 (erronous user input).
+	if part.Options.BatchCount <= 0 {
+		part.Options.BatchCount = 1
+	}
+	// Default some more too
+	if part.Options.BatchInterval == "" {
+		part.Options.BatchInterval = "NULL"
+	}
+	if part.Options.MigrationOrder == "" {
+		part.Options.MigrationOrder = "ASC"
+	}
+
+	return part
+}
+
 func main() {
 	GoPartManCmd.AddCommand(versionCmd)
 	GoPartManCmd.PersistentFlags().BoolVarP(&flags.daemon, "daemon", "m", false, "daemon mode")
+	GoPartManCmd.PersistentFlags().StringVarP(&flags.configFile, "config", "c", "", "An optional path to the YML configuration file")
 	GoPartManCmd.PersistentFlags().StringVarP(&flags.server, "server", "s", "", "The configured server")
 	GoPartManCmd.PersistentFlags().StringVarP(&flags.partition, "partition", "p", "", "The configured partition")
 	GoPartManCmd.PersistentFlags().BoolVarP(&flags.verbose, "verbose", "v", false, "verbose output")
@@ -236,6 +247,10 @@ func main() {
 	cfgPath := "/etc/gopartman.yml"
 	if _, err := os.Stat(cfgPath); err != nil {
 		cfgPath = "./gopartman.yml"
+	}
+	// If a specific path was given
+	if flags.configFile != "" {
+		cfgPath = flags.configFile
 	}
 	b, err := ioutil.ReadFile(cfgPath)
 	if err != nil {
@@ -258,13 +273,7 @@ func main() {
 			for pName, _ := range cfg.Connections[conn].Partitions {
 				part := cfg.Connections[conn].Partitions[pName]
 
-				// If not set in the YML, Go will make this the empty value, 0. Even if a user set this value to 0, that's not a valid value in any use of this option.
-				// So set it to 1 if 0 or less than 0 (erronous user input).
-				if part.Options.BatchCount <= 0 {
-					part.Options.BatchCount = 1
-				}
-
-				cfg.Connections[conn].Partitions[pName] = part
+				cfg.Connections[conn].Partitions[pName] = NewPartitionDefaults(part)
 			}
 
 			// First make sure pg_partman is on each server

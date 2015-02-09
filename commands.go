@@ -73,66 +73,15 @@ var reinstallPartmanCmd = &cobra.Command{
 var createParentCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Creates a partition",
-	Long: `Creates a partition for a given table based on the options passed.
-	Partitions must be maintained with the ` + "\x1b[33m\x1b[40m" + `maintenance` + "\x1b[0m\x1b[0m" + ` command (optional for types marked with *) 
-	which will create new child partition tables as well as update any necessary triggeres. Note: Only newly inserted data will appear in the
-	new partition tables. Existing data will remain in the parent table. Any data inserted for which a partition table does not exist will 
-	be stored in the original parent table.
-
-	Partition types can be one of the following:
+	Long: `Creates a partition for a given table based on the ` + "\x1b[33m\x1b[40m" + `gopartman.yml` + "\x1b[0m\x1b[0m" + ` configuration file.
 	
-	time-static   - Trigger function inserts only into specifically named partitions. The number of partitions
-	                managed behind and ahead of the current one is determined by the **premake** config value 
-	                (default of 4 means data for 4 previous and 4 future partitions are handled automatically).
-	                *Beware setting the premake value too high as that will lessen the efficiency of this 
-	                partitioning method.*
-	                Inserts to parent table outside the hard-coded time window will go to the parent.
-	                Ideal for high TPS tables that get inserts of new data only.
-
-	time-dynamic  - Trigger function can insert into any existing child partition based on the value of the control 
-	                column at the time of insertion.
-	                More flexible but not as efficient as time-static.
-
-	time-custom   - Allows use of any time interval instead of the premade ones below. Note this uses the same 
-	                method as time-dynamic (so it can insert into any child at any time) as well as a lookup table.
-	                So, while it is the most flexible of the time-based options, it is the least performant.
-
-	id-static *   - Same functionality and use of the premake value as time-static but for a numeric range 
-	                instead of time.
-	                By default, when the id value reaches 50% of the max value for that partition, it will automatically create 
-	                the next partition in sequence if it doesn't yet exist.
-	                Only supports id values greater than or equal to zero.
-
-	id-dynamic *  - Same functionality and limitations as time-dynamic but for a numeric range instead of time.
-	                Uses same 50% rule as id-static to create future partitions or can use maintenance if desired.
-	                Only supports id values greater than or equal to zero.
-	
-	The partition time interval must be set for certain partition types. Some valid values include:
-
-	yearly          - One partition per year
-	quarterly       - One partition per yearly quarter. Partitions are named as YYYYqQ (ex: 2012q4)
-	monthly         - One partition per month
-	weekly          - One partition per week. Follows ISO week date format (http://en.wikipedia.org/wiki/ISO_week_date). 
-	                  Partitions are named as IYYYwIW (ex: 2012w36)
-	daily           - One partition per day
-	hourly          - One partition per hour
-	half-hour       - One partition per 30 minute interval on the half-hour (1200, 1230)
-	quarter-hour    - One partition per 15 minute interval on the quarter-hour (1200, 1215, 1230, 1245)
-	<interval>      - For the time-custom partitioning type, this can be any interval value that is valid for the 
-	                  PostgreSQL interval data type. Do not type cast the parameter value, just leave as text.
-	<integer>       - For ID based partitions, the integer value range of the ID that should be set per partition. 
-	                  Enter this as an integer in text format ('100' not 100). Must be greater than one.
-
-	Example: ./gopartman create -h localhost -u username -d myblogdb -t public.posts -c created -y time-static -i monthly
+	Example: ./gopartman create -c /some/other/gopartman.yml -p mypartition
 
 	That call would create a daily partition on a posts table with 4 days before and 4 days ahead of the current date. 
-	Of course, more tables would need to be created for the future. 
-	So one would then run: ./gopartman maintenance -s localhost -u username -d myblogdb -t public.posts
+	Of course, more tables would need to be created for the future. If gopartman is not running as a daemon, you will manually 
+	need to call additional maintenance commands (on crontab perhaps).
 
-	That call would then create additional tables if necessary. This maintenance call should be executed on a regular basis.
-	In the case of this example, monthly maintenance calls would work because there are 4 months created in advance.
-
-	Any new data will now be stored in an available partition (if one does not exist, it will be stored in the parent table).
+	So one might then run: ./gopartman maintenance -c /some/other/gopartman.yml -p mypartition
 	`,
 	Run: func(cmd *cobra.Command, args []string) {
 		fServer, fPartition, err := getFlaggedPartition()
@@ -144,7 +93,7 @@ var createParentCmd = &cobra.Command{
 			fServer.loadPgPartman()
 		}
 
-		l.Info("Creating a partition on " + flags.server + " for table " + flags.partition)
+		l.Info("Creating a partition on " + flags.server + " for table " + fPartition.Table + " (" + flags.partition + ")")
 		fServer.CreateParent(fPartition)
 	},
 }
