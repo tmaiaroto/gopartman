@@ -86,12 +86,12 @@ func showSchedule(w rest.ResponseWriter, r *rest.Request) {
 	w.WriteJson(res.End("There are " + strconv.Itoa(len(jobs)) + " jobs scheduled."))
 }
 
-// API: Shows the partitions managed by this server
-func showChildren(w rest.ResponseWriter, r *rest.Request) {
+// API: Shows detailed information about a specific partition
+func showPartition(w rest.ResponseWriter, r *rest.Request) {
 	res := NewHypermediaResource()
 
 	res.Links["self"] = HypermediaLink{
-		Href: "/partition/{server}/{partition}/children",
+		Href: "/partition/{server}/{partition}",
 	}
 
 	partitionName := r.PathParam("partition")
@@ -104,8 +104,38 @@ func showChildren(w rest.ResponseWriter, r *rest.Request) {
 		children := db.GetChildPartitions(partition)
 		res.Data["totalChildren"] = len(children)
 		res.Data["children"] = children
+		res.Data["config"] = db.PartitionInfo(partition)
 		res.Success()
 		w.WriteJson(res.End("There are " + strconv.Itoa(len(children)) + " children for this partition."))
+	} else {
+		l.Error(err)
+		w.WriteJson(res.End("The partition was not found."))
+	}
+}
+
+// API: Shows just the configuration for a specific partition
+func showPartitionConfig(w rest.ResponseWriter, r *rest.Request) {
+	res := NewHypermediaResource()
+
+	res.Links["self"] = HypermediaLink{
+		Href: "/partition/{server}/{partition}/config",
+	}
+
+	partitionName := r.PathParam("partition")
+	serverName := r.PathParam("server")
+
+	db, partition, err := GetPartition(serverName, partitionName)
+	if err == nil {
+		res.Data["config"] = db.PartitionInfo(partition)
+		res.Data["maintenanceJobId"] = partition.MaintenanceJobId
+
+		for _, item := range c.Entries() {
+			if item.Id == partition.MaintenanceJobId {
+				res.Data["nextScheduledMaintenance"] = item.Next
+			}
+		}
+		res.Success()
+		w.WriteJson(res.End("The partition was found."))
 	} else {
 		l.Error(err)
 		w.WriteJson(res.End("The partition was not found."))

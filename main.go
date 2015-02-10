@@ -101,8 +101,8 @@ type Server struct {
 
 // A struct for records in the `partman.part_config` table.
 type PartConfig struct {
-	ConstraintCols     string `json:"constraint_cols yaml:"constraint_cols" db:"constraint_cols"`
-	Control            string `json:"control yaml:"control" db:"control"`
+	ConstraintCols     string `json:"constraint_cols" yaml:"constraint_cols" db:"constraint_cols"`
+	Control            string `json:"control" yaml:"control" db:"control"`
 	DatetimeString     string `json:"datetime_string" yaml:"datetime_string" db:"datetime_string"`
 	InheritFk          bool   `json:"inherit_fk" yaml:"inherit_fk" db:"inherit_fk"`
 	Jobmon             bool   `json:"jobmon" yaml:"jobmon" db:"jobmon"`
@@ -426,7 +426,8 @@ func main() {
 			err := handler.SetRoutes(
 				&rest.Route{"GET", "/partitions", showPartitions},
 				&rest.Route{"GET", "/schedule", showSchedule},
-				&rest.Route{"GET", "/partition/:server/:partition/children", showChildren},
+				&rest.Route{"GET", "/partition/:server/:partition", showPartition},
+				&rest.Route{"GET", "/partition/:server/:partition/config", showPartitionConfig},
 			)
 			if err != nil {
 				log.Fatal(err)
