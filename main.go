@@ -11,6 +11,7 @@
 package main
 
 import (
+	"errors"
 	"github.com/ant0ine/go-json-rest/rest"
 	"github.com/fatih/color"
 	"github.com/jmoiron/sqlx"
@@ -117,6 +118,13 @@ type PartConfig struct {
 	UseRunMaintenance  bool   `json:"use_run_maintenance" yaml:"use_run_maintenance" db:"use_run_maintenance"`
 }
 
+// A struct for children partition tables
+type Child struct {
+	Table       string `json:"table" db:"table"`
+	Records     int    `json:"records" db:"records"`
+	BytesOnDisk uint64 `json:"bytesOnDisk" db:"bytesOnDisk"`
+}
+
 // Wrap sqlx.DB in order to add to it
 type DB struct {
 	sqlx.DB
@@ -214,6 +222,19 @@ func (bamw *BasicAuthMw) unauthorized(writer rest.ResponseWriter) {
 // Helper function to get the name of a function (primarily used to show scheduled tasks)
 func getFunctionName(i interface{}) string {
 	return runtime.FuncForPC(reflect.ValueOf(i).Pointer()).Name()
+}
+
+// Helper function to return the Partition from configuration if it exists
+func GetPartition(serverName string, partitionName string) (*DB, *Partition, error) {
+	var err error
+	if sVal, ok := cfg.Connections[serverName]; ok {
+		if pVal, ok := cfg.Connections[serverName].Partitions[partitionName]; ok {
+			err = nil
+			return &sVal, &pVal, err
+		}
+	}
+	err = errors.New("that partition does not seem to be configured in gopartman.yml")
+	return &DB{}, &Partition{}, err
 }
 
 // Sets some default values for a partition struct.
@@ -405,6 +426,7 @@ func main() {
 			err := handler.SetRoutes(
 				&rest.Route{"GET", "/partitions", showPartitions},
 				&rest.Route{"GET", "/schedule", showSchedule},
+				&rest.Route{"GET", "/partition/:server/:partition/children", showChildren},
 			)
 			if err != nil {
 				log.Fatal(err)

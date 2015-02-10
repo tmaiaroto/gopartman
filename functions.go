@@ -85,6 +85,30 @@ func (db DB) PartitionInfo(p *Partition) PartConfig {
 	return pc
 }
 
+// Shows child partitions for a partition table.
+func (db DB) GetChildPartitions(p *Partition) []Child {
+	c := []Child{}
+	err := db.Select(&c, "SELECT partman.show_partitions($1) AS table", p.Table)
+	if err != nil {
+		l.Error(err)
+	} else {
+		// Also get the record count and size on disk for each partition
+		for i, child := range c {
+			err := db.Get(&c[i].Records, "SELECT COUNT(*) FROM "+child.Table)
+			if err != nil {
+				l.Error(err)
+			}
+			// pg_size_pretty() will say "bytes" or "kB" etc.
+			//err = db.Get(&bytesStr, "SELECT pg_size_pretty(pg_total_relation_size('"+child.Table+"'));")
+			err = db.Get(&c[i].BytesOnDisk, "SELECT pg_total_relation_size('"+child.Table+"');")
+			if err != nil {
+				l.Error(err)
+			}
+		}
+	}
+	return c
+}
+
 // Sets a retention period on a partition
 func (db DB) SetRetention(p *Partition) {
 	if p.Retention == "" {

@@ -18,11 +18,11 @@ func showPartitions(w rest.ResponseWriter, r *rest.Request) {
 		Href: "/partitions/add",
 	}
 	res.Links["partitions:delete"] = HypermediaLink{
-		Href:      "/partitions/delete/{id}",
+		Href:      "/partitions/delete/{server}/{partition}",
 		Templated: true,
 	}
 	res.Links["partitions:read"] = HypermediaLink{
-		Href:      "/partitions/read/{id}",
+		Href:      "/partitions/read/{server}/{partition}",
 		Templated: true,
 	}
 
@@ -84,6 +84,32 @@ func showSchedule(w rest.ResponseWriter, r *rest.Request) {
 
 	res.Success()
 	w.WriteJson(res.End("There are " + strconv.Itoa(len(jobs)) + " jobs scheduled."))
+}
+
+// API: Shows the partitions managed by this server
+func showChildren(w rest.ResponseWriter, r *rest.Request) {
+	res := NewHypermediaResource()
+
+	res.Links["self"] = HypermediaLink{
+		Href: "/partition/{server}/{partition}/children",
+	}
+
+	partitionName := r.PathParam("partition")
+	serverName := r.PathParam("server")
+
+	// queryParams := r.URL.Query()
+
+	db, partition, err := GetPartition(serverName, partitionName)
+	if err == nil {
+		children := db.GetChildPartitions(partition)
+		res.Data["totalChildren"] = len(children)
+		res.Data["children"] = children
+		res.Success()
+		w.WriteJson(res.End("There are " + strconv.Itoa(len(children)) + " children for this partition."))
+	} else {
+		l.Error(err)
+		w.WriteJson(res.End("The partition was not found."))
+	}
 }
 
 // Inspired by a few hypermedia formats, this is a structure for Social Harvest API responses.
