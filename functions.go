@@ -5,6 +5,11 @@
 
 package main
 
+import (
+	"github.com/imdario/mergo"
+	"gopkg.in/guregu/null.v2"
+)
+
 // Creates a parent from a given table and creatse partitions based on the given settings.
 func (db DB) CreateParent(p *Partition) {
 	var count int
@@ -56,12 +61,17 @@ func (db DB) RunMaintenance(partitionName string, analyze bool, jobmon bool) {
 
 // Undo any partition by copying data from the child partition tables to the parent. Note: Batches can not be smaller than the partition interval because this copies entire tables.
 func (db DB) UndoPartition(p *Partition) {
-	// These get reversed a bit in the phrasing
-	keepTable := true
-	if p.Options.DropTableOnUndo {
-		keepTable = false
+	// Pull basic arguments
+	m := map[string]interface{}{"table": p.Table}
+	// Pull custom function arguments if set in configuration
+	if err := mergo.Merge(&m, p.Options.Functions.UndoPartition); err != nil {
+		l.Error(err)
 	}
-	m := map[string]interface{}{"table": p.Table, "batchCount": p.Options.BatchCount, "keepTable": keepTable, "jobmon": p.Options.Jobmon, "lockWait": p.Options.LockWait}
+	// Defaults (https://github.com/keithf4/pg_partman/blob/master/sql/functions/undo_partition.sql#L5)
+	if err := mergo.Merge(&m, map[string]interface{}{"batchCount": 1, "keepTable": true, "jobmon": true, "lockWait": 0}); err != nil {
+		l.Error(err)
+	}
+
 	_, err := db.NamedExec(`SELECT partman.undo_partition(:table, :batchCount, :keepTable, :jobmon, :lockWait);`, m)
 	if err != nil {
 		l.Error(err)
@@ -122,16 +132,22 @@ func (db DB) SetRetention(p *Partition) {
 	}
 	// Make sure it exists.
 	if count > 0 {
-		retentionSchema := "NULL"
-		if p.Options.RetentionSchema != "" {
-			retentionSchema = p.Options.RetentionSchema
+		// Pull basic arguments (TODO: Maybe allow more to be set)
+		m := map[string]interface{}{"table": p.Table, "retention": p.Retention, "retentionSchema": p.Options.RetentionSchema, "retentionKeepTable": p.Options.RetentionKeepTable}
+		// Pull custom function arguments if set in configuration
+		if err := mergo.Merge(&m, p.Options.Functions.SetRetention); err != nil {
+			l.Error(err)
 		}
-		// By default this is true, but our struct becomes false if not set. So we need to flip it around in order to keep the default behavior of pg_partman.
-		retentionKeepTable := true
-		if p.Options.RetentionRemoveTable {
-			retentionKeepTable = false
+		// Defaults are actually going to come from the existing record in this case
+		pc := PartConfig{}
+		err := db.Select(&pc, "SELECT * FROM partman.part_config WHERE parent_table = $1", p.Table)
+		if err != nil {
+			l.Error(err)
 		}
-		m := map[string]interface{}{"table": p.Table, "retention": p.Retention, "retentionSchema": retentionSchema, "retentionKeepTable": retentionKeepTable}
+		if err := mergo.Merge(&m, map[string]interface{}{"retention_schema": pc.RetentionSchema, "retention_keep_table": pc.RetentionKeepTable}); err != nil {
+			l.Error(err)
+		}
+
 		_, err = db.NamedExec(`UPDATE partman.part_config SET retention = :retention, retention_schema = :retentionSchema, retention_keep_table = :retentionKeepTable WHERE parent_table = :table;`, m)
 		if err != nil {
 			l.Error(err)
@@ -150,7 +166,7 @@ func (db DB) RemoveRetention(p *Partition) {
 	}
 	// Make sure it exists.
 	if count > 0 {
-		m := map[string]interface{}{"table": p.Table, "retention": "NULL", "retentionSchema": "NULL", "retentionKeepTable": true}
+		m := map[string]interface{}{"table": p.Table, "retention": null.String{}, "retentionSchema": null.String{}, "retentionKeepTable": true}
 		_, err = db.NamedExec(`UPDATE partman.part_config SET retention = :retention, retention_schema = :retentionSchema, retention_keep_table = :retentionKeepTable WHERE parent_table = :table;`, m)
 		if err != nil {
 			l.Error(err)
@@ -171,8 +187,18 @@ func (db DB) PartitionDataTime(p *Partition) {
 	}
 	// Make sure it exists.
 	if count > 0 {
-		m := map[string]interface{}{"table": p.Table, "batchCount": p.Options.BatchCount, "interval": p.Options.BatchInterval, "lockWait": p.Options.LockWait, "order": p.Options.MigrationOrder}
-		_, err = db.NamedExec(`SELECT partman.partition_data_time(:table, :batchCount, :interval, :lockWait, :order);`, m)
+		// Pull basic arguments
+		m := map[string]interface{}{"table": p.Table}
+		// Pull custom function arguments if set in configuration
+		if err := mergo.Merge(&m, p.Options.Functions.PartitionDataTime); err != nil {
+			l.Error(err)
+		}
+		// Defaults (https://github.com/keithf4/pg_partman/blob/master/sql/functions/partition_data_time.sql#L4)
+		if err := mergo.Merge(&m, map[string]interface{}{"batchCount": 1, "batchInterval": null.String{}, "lockWait": 0, "order": "ASC"}); err != nil {
+			l.Error(err)
+		}
+
+		_, err = db.NamedExec(`SELECT partman.partition_data_time(:table, :batchCount, :batchInterval, :lockWait, :order);`, m)
 		if err != nil {
 			l.Error(err)
 		} else {
@@ -192,8 +218,18 @@ func (db DB) PartitionDataId(p *Partition) {
 	}
 	// Make sure it exists.
 	if count > 0 {
-		m := map[string]interface{}{"table": p.Table, "batchCount": p.Options.BatchCount, "interval": p.Options.BatchInterval, "lockWait": p.Options.LockWait}
-		_, err = db.NamedExec(`SELECT partman.partition_data_id(:table, :batchCount, :interval, :lockWait);`, m)
+		// Pull basic arguments
+		m := map[string]interface{}{"table": p.Table}
+		// Pull custom function arguments if set in configuration
+		if err := mergo.Merge(&m, p.Options.Functions.PartitionDataId); err != nil {
+			l.Error(err)
+		}
+		// Defaults (https://github.com/keithf4/pg_partman/blob/master/sql/functions/partition_data_id.sql#L4)
+		if err := mergo.Merge(&m, map[string]interface{}{"batchCount": 1, "batchInterval": null.String{}, "lockWait": 0, "order": "ASC"}); err != nil {
+			l.Error(err)
+		}
+
+		_, err = db.NamedExec(`SELECT partman.partition_data_id(:table, :batchCount, :batchInterval, :lockWait, :order);`, m)
 		if err != nil {
 			l.Error(err)
 		} else {
@@ -213,20 +249,20 @@ func (db DB) DropPartitionTime(p *Partition) {
 	if err != nil {
 		l.Error(err)
 	}
-
-	keepTable := true
-	if p.Options.DropTableOnUninherit {
-		keepTable = false
-	}
-	keepIndex := true
-	if p.Options.DropIndexOnUninherit {
-		keepIndex = false
-	}
-
 	// Make sure it exists.
 	if count > 0 {
-		m := map[string]interface{}{"table": p.Table, "interval": p.Interval, "keepTable": keepTable, "keepIndex": keepIndex, "retentionSchema": p.Options.RetentionSchema}
-		_, err = db.NamedExec(`SELECT partman.drop_partition_time(:table, :interval, :keepTable, :keepIndex, :retentionSchema);`, m)
+		// Pull basic arguments
+		m := map[string]interface{}{"table": p.Table}
+		// Pull custom function arguments if set in configuration
+		if err := mergo.Merge(&m, p.Options.Functions.DropPartitionTime); err != nil {
+			l.Error(err)
+		}
+		// Defaults (https://github.com/keithf4/pg_partman/blob/master/sql/functions/drop_partition_time.sql#L5)
+		if err := mergo.Merge(&m, map[string]interface{}{"retention": null.String{}, "keepTable": null.String{}, "keepIndex": null.String{}, "retentionSchema": null.String{}}); err != nil {
+			l.Error(err)
+		}
+
+		_, err = db.NamedExec(`SELECT partman.drop_partition_time(:table, :retention, :keepTable, :keepIndex, :retentionSchema);`, m)
 		if err != nil {
 			l.Error(err)
 		} else {
@@ -245,20 +281,20 @@ func (db DB) DropPartitionId(p *Partition) {
 	if err != nil {
 		l.Error(err)
 	}
-
-	keepTable := true
-	if p.Options.DropTableOnUninherit {
-		keepTable = false
-	}
-	keepIndex := true
-	if p.Options.DropIndexOnUninherit {
-		keepIndex = false
-	}
-
 	// Make sure it exists.
 	if count > 0 {
-		m := map[string]interface{}{"table": p.Table, "retentionId": p.Options.DropIdOlderThanOnUninherit, "keepTable": keepTable, "keepIndex": keepIndex, "retentionSchema": p.Options.RetentionSchema}
-		_, err = db.NamedExec(`SELECT partman.drop_partition_time(:table, :retentionId, :keepTable, :keepIndex, :retentionSchema);`, m)
+		// Pull basic arguments
+		m := map[string]interface{}{"table": p.Table}
+		// Pull custom function arguments if set in configuration
+		if err := mergo.Merge(&m, p.Options.Functions.DropPartitionTime); err != nil {
+			l.Error(err)
+		}
+		// Defaults (https://github.com/keithf4/pg_partman/blob/master/sql/functions/drop_partition_id.sql#L5)
+		if err := mergo.Merge(&m, map[string]interface{}{"retention": null.String{}, "keepTable": null.String{}, "keepIndex": null.String{}, "retentionSchema": null.String{}}); err != nil {
+			l.Error(err)
+		}
+
+		_, err = db.NamedExec(`SELECT partman.drop_partition_time(:table, :retention, :keepTable, :keepIndex, :retentionSchema);`, m)
 		if err != nil {
 			l.Error(err)
 		} else {

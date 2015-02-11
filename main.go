@@ -18,6 +18,7 @@ import (
 	_ "github.com/lib/pq"
 	"github.com/spf13/cobra"
 	"github.com/tmaiaroto/cron"
+	"gopkg.in/guregu/null.v2"
 	"gopkg.in/yaml.v2"
 	"io/ioutil"
 	"log"
@@ -73,20 +74,19 @@ type Partition struct {
 	Interval  string `json:"interval" yaml:"interval"`
 	Retention string `json:"retention" yaml:"retention"`
 	Options   struct {
-		DropTableOnUndo            bool   `json:"dropTableOnUndo" yaml:"dropTableOnUndo"`
-		DropTableOnUninherit       bool   `json:"dropTableOnUninherit" yaml:"dropTableOnUninherit"`
-		DropIndexOnUninherit       bool   `json:"dropIndexOnUninherit" yaml:"dropIndexOnUninherit"`
-		DropIdOlderThanOnUninherit int    `json:"dropIdOlderThan" yaml:"dropIdOlderThan"`
-		LockWait                   int    `json:"lockWait" yaml:"lockWait"`
-		Analyze                    bool   `json:"analyze" yaml:"analyze"`
-		BatchCount                 int    `json:"batchCount" yaml:"batchCount"`
-		BatchInterval              string `json:"batchInterval" yaml:"batchInterval"`
-		MigrationOrder             string `json:"migrationOrder" yaml:"migrationOrder"`
-		RetentionRemoveTable       bool   `json:"retentionRemoveTable" yaml:"retentionRemoveTable"`
-		RetentionSchema            string `json:"retentionSchema" yaml:"retentionSchema"`
-		RetentionKeepIndex         bool   `json:"retentionKeepIndex" yaml:"retentionKeepIndex"`
-		Jobmon                     bool   `json:"jobmon" yaml:"jobmon"`
-	} `json:"options" yaml:"optoins"`
+		Functions struct {
+			RunMaintenance    map[string]interface{} `json:"runMaintenance" yaml:"runMaintenance"`
+			UndoPartition     map[string]interface{} `json:"undoPartition" yaml:"undoPartition"`
+			SetRetention      map[string]interface{} `json:"setRetention" yaml:"setRetention"`
+			PartitionDataId   map[string]interface{} `json:"partitionDataId" yaml:"partitionDataId"`
+			PartitionDataTime map[string]interface{} `json:"partitionDataTime" yaml:"partitionDataTime"`
+			DropPartitionId   map[string]interface{} `json:"dropPartitionId" yaml:"dropPartitionId"`
+			DropPartitionTime map[string]interface{} `json:"dropPartitionTime" yaml:"dropPartitionTime"`
+		} `json:"functions" yaml:"functions"`
+		RetentionSchema    null.String `json:"retentionSchema" yaml:"retentionSchema"`
+		RetentionKeepTable bool        `json:"retentionKeepTable" yaml:"retentionKeepTable"`
+		Jobmon             bool        `json:"jobmon" yaml:"jobmon"`
+	} `json:"options" yaml:"options"`
 	MaintenanceJobId int64 `json:"maintenanceJobId" yaml:"maintenanceJobId"`
 }
 
@@ -237,25 +237,6 @@ func GetPartition(serverName string, partitionName string) (*DB, *Partition, err
 	return &DB{}, &Partition{}, err
 }
 
-// Sets some default values for a partition struct.
-func NewPartitionDefaults(part Partition) Partition {
-	// If not set in the YML (or when making a new struct), Go will make this the empty value, 0.
-	// Even if a user set this value to 0, that's not a valid value in any use of this option.
-	// So set it to 1 if 0 or less than 0 (erronous user input).
-	if part.Options.BatchCount <= 0 {
-		part.Options.BatchCount = 1
-	}
-	// Default some more too
-	if part.Options.BatchInterval == "" {
-		part.Options.BatchInterval = "NULL"
-	}
-	if part.Options.MigrationOrder == "" {
-		part.Options.MigrationOrder = "ASC"
-	}
-
-	return part
-}
-
 func main() {
 	GoPartManCmd.AddCommand(versionCmd)
 	GoPartManCmd.PersistentFlags().BoolVarP(&flags.daemon, "daemon", "m", false, "daemon mode")
@@ -294,7 +275,7 @@ func main() {
 			for pName, _ := range cfg.Connections[conn].Partitions {
 				part := cfg.Connections[conn].Partitions[pName]
 
-				cfg.Connections[conn].Partitions[pName] = NewPartitionDefaults(part)
+				cfg.Connections[conn].Partitions[pName] = part
 			}
 
 			// First make sure pg_partman is on each server
