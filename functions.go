@@ -44,16 +44,25 @@ func (db DB) CreateParents() {
 }
 
 // Calls the `run_maintenance()` function and adds new partition tables and drops old partitions if a retention period was set. If a partition name is passed, it will run maintenance for that partition table ONLY. "NULL" will run maintenance on all tables.
-func (db DB) RunMaintenance(partitionName string, analyze bool, jobmon bool) {
-	_, err := db.NamedExec(`SELECT partman.run_maintenance(:table, :analyze, :jobmon);`, struct {
-		Table   string
-		Analyze bool
-		Jobmon  bool
-	}{
-		Table:   db.Partitions[partitionName].Table,
-		Analyze: analyze,
-		Jobmon:  jobmon,
-	})
+func (db DB) RunMaintenance(p *Partition, opts ...map[string]interface{}) {
+	// Pull basic arguments
+	m := map[string]interface{}{"table": p.Table}
+	// Pull overrides passed to this function (won't come from standalone gopartman, but could from any other package which may use it)
+	if len(opts) > 0 {
+		if err := mergo.Merge(&m, opts[0]); err != nil {
+			l.Error(err)
+		}
+	}
+	// Pull custom function arguments if set in configuration
+	if err := mergo.Merge(&m, p.Options.Functions.RunMaintenance); err != nil {
+		l.Error(err)
+	}
+	// Defaults
+	if err := mergo.Merge(&m, map[string]interface{}{"analyze": true, "jobmon": true}); err != nil {
+		l.Error(err)
+	}
+
+	_, err := db.NamedExec(`SELECT partman.run_maintenance(:table, :analyze, :jobmon);`, m)
 	if err != nil {
 		l.Error(err)
 	}

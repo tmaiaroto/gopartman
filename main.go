@@ -319,42 +319,42 @@ func main() {
 					// setting a temporary "part" value as a work around for not being able to assign cfg.Connections[conn].Partitions[pName].MaintenanceJobId directly
 					part := cfg.Connections[conn].Partitions[pName]
 					part.MaintenanceJobId, _ = c.AddFunc("@every 30m", func() {
-						cfg.Connections[conn].RunMaintenance(pName, true, true)
+						cfg.Connections[conn].RunMaintenance(&part)
 					}, jobName)
 					cfg.Connections[conn].Partitions[pName] = part
 					break
 				case "hourly":
 					part := cfg.Connections[conn].Partitions[pName]
 					part.MaintenanceJobId, _ = c.AddFunc("@hourly", func() {
-						cfg.Connections[conn].RunMaintenance(pName, true, true)
+						cfg.Connections[conn].RunMaintenance(&part)
 					}, jobName)
 					cfg.Connections[conn].Partitions[pName] = part
 					break
 				case "daily":
 					part := cfg.Connections[conn].Partitions[pName]
 					part.MaintenanceJobId, _ = c.AddFunc("@daily", func() {
-						cfg.Connections[conn].RunMaintenance(pName, true, true)
+						cfg.Connections[conn].RunMaintenance(&part)
 					}, jobName)
 					cfg.Connections[conn].Partitions[pName] = part
 					break
 				case "weekly":
 					part := cfg.Connections[conn].Partitions[pName]
 					part.MaintenanceJobId, _ = c.AddFunc("@weekly", func() {
-						cfg.Connections[conn].RunMaintenance(pName, true, true)
+						cfg.Connections[conn].RunMaintenance(&part)
 					}, jobName)
 					cfg.Connections[conn].Partitions[pName] = part
 					break
 				case "monthly", "quarterly":
 					part := cfg.Connections[conn].Partitions[pName]
 					part.MaintenanceJobId, _ = c.AddFunc("@monthly", func() {
-						cfg.Connections[conn].RunMaintenance(pName, true, true)
+						cfg.Connections[conn].RunMaintenance(&part)
 					}, jobName)
 					cfg.Connections[conn].Partitions[pName] = part
 					break
 				case "yearly":
 					part := cfg.Connections[conn].Partitions[pName]
 					part.MaintenanceJobId, _ = c.AddFunc("@yearly", func() {
-						cfg.Connections[conn].RunMaintenance(pName, true, true)
+						cfg.Connections[conn].RunMaintenance(&part)
 					}, jobName)
 					cfg.Connections[conn].Partitions[pName] = part
 					break

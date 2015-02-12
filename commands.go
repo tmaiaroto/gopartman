@@ -23,6 +23,16 @@ func getFlaggedPartition() (*DB, *Partition, error) {
 	return &DB{}, &Partition{}, err
 }
 
+// Gets just the database server connection passed from the command line
+func getFlaggedServer() (*DB, error) {
+	var err error
+	if sVal, ok := cfg.Connections[flags.server]; ok {
+		return &sVal, err
+	}
+	err = errors.New("that server does not seem to be configured in gopartman.yml")
+	return &DB{}, err
+}
+
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print the version number of gopartman",
@@ -104,24 +114,23 @@ var runMaintenanceCmd = &cobra.Command{
 	Short: "Runs maintenance on partitions",
 	Long:  "\nRuns maintenance on all tables if no table name was given. Maintenance includes adding new partition tables and removing old ones if a retention policy was set.",
 	Run: func(cmd *cobra.Command, args []string) {
-		fServer, _, err := getFlaggedPartition()
-		if err != nil {
-			l.Critical(err)
-			return
+		if len(flags.partition) == 0 && len(flags.server) > 0 {
+			fServer, _ := getFlaggedServer()
+			l.Info("Running maintenance on " + flags.server + " for all tables")
+			fServer.RunMaintenance(&Partition{Table: ""})
+		} else {
+			fServer, fPartition, err := getFlaggedPartition()
+			if err != nil {
+				l.Critical(err)
+				return
+			}
+			if !fServer.sqlFunctionsExist() {
+				l.Error("Error: pg_partman not installed. Please run the `install` command first.")
+				return
+			}
+			l.Info("Running maintenance on " + flags.server + " for table " + fPartition.Table)
+			fServer.RunMaintenance(fPartition)
 		}
-
-		if !fServer.sqlFunctionsExist() {
-			l.Error("Error: pg_partman not installed. Please run the `install` command first.")
-			return
-		}
-
-		// if flags.partTable != "" {
-		// 	l.Info("Running maintenance on " + flags.pgDatabase + " for table " + flags.partTable)
-		// 	flaggedDB.RunMaintenance("flagged", flags.analyze, flags.jobmon)
-		// } else {
-		// 	l.Info("Running maintenance on " + flags.pgDatabase + " for all tables")
-		// 	flaggedDB.RunMaintenance("NULL", flags.analyze, flags.jobmon)
-		// }
 	},
 }
 
