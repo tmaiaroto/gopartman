@@ -60,9 +60,15 @@ func (db DB) RunMaintenance(partitionName string, analyze bool, jobmon bool) {
 }
 
 // Undo any partition by copying data from the child partition tables to the parent. Note: Batches can not be smaller than the partition interval because this copies entire tables.
-func (db DB) UndoPartition(p *Partition) {
+func (db DB) UndoPartition(p *Partition, opts ...map[string]interface{}) {
 	// Pull basic arguments
 	m := map[string]interface{}{"table": p.Table}
+	// Pull overrides passed to this function (won't come from standalone gopartman, but could from any other package which may use it)
+	if len(opts) > 0 {
+		if err := mergo.Merge(&m, opts[0]); err != nil {
+			l.Error(err)
+		}
+	}
 	// Pull custom function arguments if set in configuration
 	if err := mergo.Merge(&m, p.Options.Functions.UndoPartition); err != nil {
 		l.Error(err)
@@ -120,7 +126,7 @@ func (db DB) GetChildPartitions(p *Partition) []Child {
 }
 
 // Sets a retention period on a partition
-func (db DB) SetRetention(p *Partition) {
+func (db DB) SetRetention(p *Partition, opts ...map[string]interface{}) {
 	if p.Retention == "" {
 		l.Info("No retention period configured.")
 		return
@@ -134,6 +140,12 @@ func (db DB) SetRetention(p *Partition) {
 	if count > 0 {
 		// Pull basic arguments (TODO: Maybe allow more to be set)
 		m := map[string]interface{}{"table": p.Table, "retention": p.Retention, "retentionSchema": p.Options.RetentionSchema, "retentionKeepTable": p.Options.RetentionKeepTable}
+		// Pull overrides passed to this function (won't come from standalone gopartman, but could from any other package which may use it)
+		if len(opts) > 0 {
+			if err := mergo.Merge(&m, opts[0]); err != nil {
+				l.Error(err)
+			}
+		}
 		// Pull custom function arguments if set in configuration
 		if err := mergo.Merge(&m, p.Options.Functions.SetRetention); err != nil {
 			l.Error(err)
@@ -179,7 +191,7 @@ func (db DB) RemoveRetention(p *Partition) {
 }
 
 // For time based partitions, this fixes/cleans up partitions which may have accidentally had data written to the parent table. Or, maybe it was data before the partition was created.
-func (db DB) PartitionDataTime(p *Partition) {
+func (db DB) PartitionDataTime(p *Partition, opts ...map[string]interface{}) {
 	var count int
 	err := db.Get(&count, "SELECT COUNT(*) FROM partman.part_config WHERE parent_table = $1", p.Table)
 	if err != nil {
@@ -189,6 +201,12 @@ func (db DB) PartitionDataTime(p *Partition) {
 	if count > 0 {
 		// Pull basic arguments
 		m := map[string]interface{}{"table": p.Table}
+		// Pull overrides passed to this function (won't come from standalone gopartman, but could from any other package which may use it)
+		if len(opts) > 0 {
+			if err := mergo.Merge(&m, opts[0]); err != nil {
+				l.Error(err)
+			}
+		}
 		// Pull custom function arguments if set in configuration
 		if err := mergo.Merge(&m, p.Options.Functions.PartitionDataTime); err != nil {
 			l.Error(err)
@@ -210,7 +228,7 @@ func (db DB) PartitionDataTime(p *Partition) {
 }
 
 // For id based partitions, this fixes/cleans up partitions which may have accidentally had data written to the parent table. Or, maybe it was data before the partition was created.
-func (db DB) PartitionDataId(p *Partition) {
+func (db DB) PartitionDataId(p *Partition, opts ...map[string]interface{}) {
 	var count int
 	err := db.Get(&count, "SELECT COUNT(*) FROM partman.part_config WHERE parent_table = $1", p.Table)
 	if err != nil {
@@ -220,6 +238,12 @@ func (db DB) PartitionDataId(p *Partition) {
 	if count > 0 {
 		// Pull basic arguments
 		m := map[string]interface{}{"table": p.Table}
+		// Pull overrides passed to this function (won't come from standalone gopartman, but could from any other package which may use it)
+		if len(opts) > 0 {
+			if err := mergo.Merge(&m, opts[0]); err != nil {
+				l.Error(err)
+			}
+		}
 		// Pull custom function arguments if set in configuration
 		if err := mergo.Merge(&m, p.Options.Functions.PartitionDataId); err != nil {
 			l.Error(err)
@@ -241,7 +265,7 @@ func (db DB) PartitionDataId(p *Partition) {
 }
 
 // Manually uninherits (and optionally drops) child partition tables from a time based partition set.
-func (db DB) DropPartitionTime(p *Partition) {
+func (db DB) DropPartitionTime(p *Partition, opts ...map[string]interface{}) {
 	//drop_partition_time(p_parent_table text, p_retention interval DEFAULT NULL, p_keep_table boolean DEFAULT NULL, p_keep_index boolean DEFAULT NULL, p_retention_schema text DEFAULT NULL) RETURNS int
 	//This function is used to drop child tables from a time-based partition set. By default, the table is just uninherited and not actually dropped. For automatically dropping old tables, it is recommended to use the run_maintenance() function with retention configured instead of calling this directly.
 	var count int
@@ -253,6 +277,12 @@ func (db DB) DropPartitionTime(p *Partition) {
 	if count > 0 {
 		// Pull basic arguments
 		m := map[string]interface{}{"table": p.Table}
+		// Pull overrides passed to this function (won't come from standalone gopartman, but could from any other package which may use it)
+		if len(opts) > 0 {
+			if err := mergo.Merge(&m, opts[0]); err != nil {
+				l.Error(err)
+			}
+		}
 		// Pull custom function arguments if set in configuration
 		if err := mergo.Merge(&m, p.Options.Functions.DropPartitionTime); err != nil {
 			l.Error(err)
@@ -274,7 +304,7 @@ func (db DB) DropPartitionTime(p *Partition) {
 }
 
 // Manually uninherits (and optionally drops) a child partition table from an id based partition set.
-func (db DB) DropPartitionId(p *Partition) {
+func (db DB) DropPartitionId(p *Partition, opts ...map[string]interface{}) {
 	//drop_partition_id(p_parent_table text, p_retention bigint DEFAULT NULL, p_keep_table boolean DEFAULT NULL, p_keep_index boolean DEFAULT NULL, p_retention_schema text DEFAULT NULL) RETURNS int
 	var count int
 	err := db.Get(&count, "SELECT COUNT(*) FROM partman.part_config WHERE parent_table = $1", p.Table)
@@ -285,6 +315,12 @@ func (db DB) DropPartitionId(p *Partition) {
 	if count > 0 {
 		// Pull basic arguments
 		m := map[string]interface{}{"table": p.Table}
+		// Pull overrides passed to this function (won't come from standalone gopartman, but could from any other package which may use it)
+		if len(opts) > 0 {
+			if err := mergo.Merge(&m, opts[0]); err != nil {
+				l.Error(err)
+			}
+		}
 		// Pull custom function arguments if set in configuration
 		if err := mergo.Merge(&m, p.Options.Functions.DropPartitionTime); err != nil {
 			l.Error(err)
