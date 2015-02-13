@@ -119,14 +119,14 @@ type PartConfig struct {
 }
 
 // A struct for children partition tables
-type Child struct {
+type ChildInfo struct {
 	Table       string `json:"table" db:"table"`
 	Records     int    `json:"records" db:"records"`
 	BytesOnDisk uint64 `json:"bytesOnDisk" db:"bytesOnDisk"`
 }
 
 // A struct for parent partition tables (not much different than Child)
-type Parent struct {
+type ParentInfo struct {
 	Table   string `json:"table" db:"table"`
 	Records int    `json:"records" db:"records"`
 }

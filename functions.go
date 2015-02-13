@@ -113,8 +113,8 @@ func (db DB) PartitionInfo(p *Partition) PartConfig {
 }
 
 // Shows child partitions for a partition table.
-func (db DB) GetChildPartitions(p *Partition) []Child {
-	c := []Child{}
+func (db DB) GetChildPartitions(p *Partition) []ChildInfo {
+	c := []ChildInfo{}
 	err := db.Select(&c, "SELECT partman.show_partitions($1) AS table", p.Table)
 	if err != nil {
 		l.Error(err)
@@ -137,14 +137,14 @@ func (db DB) GetChildPartitions(p *Partition) []Child {
 }
 
 // Checks parent partition tables to see if any records were inserted there instead of the proper child partition tables. Can be fixed with PartitionDataTime() or PartitionDataId().
-func (db DB) CheckParent() []Parent {
-	ps := []Parent{}
+func (db DB) CheckParent() []ParentInfo {
+	ps := []ParentInfo{}
 	// check_parent() returns a string: (parentTable,4) ... meaning a "parentTable" has 4 records. This needs to be parsed.
 	res := []struct {
-		ParentInfo string `db:"parent_info"`
+		value string `db:"value"`
 	}{}
 	// Make the query and get the row(s)
-	err := db.Select(&res, "SELECT partman.check_parent() AS parent_info")
+	err := db.Select(&res, "SELECT partman.check_parent() AS value")
 	if err != nil {
 		l.Error(err)
 		return ps
@@ -152,16 +152,47 @@ func (db DB) CheckParent() []Parent {
 	// Parse each row with regex
 	r, _ := regexp.Compile(`\((.*)\,([0-9]*)\)`)
 	for _, record := range res {
-		pInfo := r.FindStringSubmatch(record.ParentInfo)
+		pInfo := r.FindStringSubmatch(record.value)
 		if len(pInfo) == 3 {
 			recordCount, err := strconv.Atoi(pInfo[2])
 			if err == nil {
-				ps = append(ps, Parent{Table: pInfo[1], Records: recordCount})
+				ps = append(ps, ParentInfo{Table: pInfo[1], Records: recordCount})
 			}
 		}
 	}
 
 	return ps
+}
+
+// This function is used to reapply ownership & grants on all child tables based on what the parent table has set (for large partition sets, this can be a very long running operation).
+func (db DB) ReapplyPrivileges(p *Partition) {
+	m := map[string]interface{}{"table": p.Table}
+	_, err := db.NamedExec(`SELECT partman.reapply_privileges(:table);`, m)
+	if err != nil {
+		l.Error(err)
+	}
+}
+
+// Applies any foreign keys that exist on a parent table in a partition set to all the child tables. This function is automatically called whenever a new child table is created, so there is no need to manually run it unless you need to fix an existing child table.
+func (db DB) ApplyForeignKeys(p *Partition, opts ...map[string]interface{}) {
+	// Pull basic arguments
+	m := map[string]interface{}{"table": p.Table}
+	// Pull overrides passed to this function (won't come from standalone gopartman, but could from any other package which may use it)
+	if len(opts) > 0 {
+		if err := mergo.Merge(&m, opts[0]); err != nil {
+			l.Error(err)
+		}
+	}
+	// Defaults (https://github.com/keithf4/pg_partman/blob/master/sql/functions/apply_foreign_keys.sql#L4)
+	if err := mergo.Merge(&m, map[string]interface{}{"childTable": null.String{}, "debug": false}); err != nil {
+		l.Error(err)
+	}
+	_, err := db.NamedExec(`SELECT partman.apply_foreign_keys(:table, :childTable, :debug);`, m)
+	if err != nil {
+		l.Error(err)
+	}
+
+	//apply_foreign_keys
 }
 
 // Sets a retention period on a partition

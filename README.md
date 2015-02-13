@@ -6,7 +6,7 @@ This package is designed to manage Postgres partitions and borrows (as in, copie
 but it does put all of the functions into a "partman" schema to use. This makes it compatible with hosted Postgres services like Amazon RDS. In order to do this, the SQL 
 from pg_partman was [slightly modified](http://www.databasesoup.com/2014/12/loading-pgpartman-on-rds-or-heroku.html).
 
-This package extends [sqlx](https://github.com/jmoiron/sqlx), which is a great Go package for SQL. So you have full access to its functions.    
+This package wraps [sqlx](https://github.com/jmoiron/sqlx), which is a great Go package for SQL. So you have full access to its functions.    
 
 pg_partman has many functions and you still have full access to them. You should reference the [pg_partman manual](https://github.com/keithf4/pg_partman/blob/master/doc/pg_partman.md) for 
 andditional information and help.    

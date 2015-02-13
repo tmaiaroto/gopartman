@@ -1,4 +1,6 @@
 /**
+ * Here be dragons. Don't look in here.
+ *
  * This file contains all the SQL to load into Postgres all of the functions needed.
  * These are pulled from: https://github.com/keithf4/pg_partman/tree/master/sql/functions
  *
