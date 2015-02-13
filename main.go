@@ -125,6 +125,12 @@ type Child struct {
 	BytesOnDisk uint64 `json:"bytesOnDisk" db:"bytesOnDisk"`
 }
 
+// A struct for parent partition tables (not much different than Child)
+type Parent struct {
+	Table   string `json:"table" db:"table"`
+	Records int    `json:"records" db:"records"`
+}
+
 // Wrap sqlx.DB in order to add to it
 type DB struct {
 	sqlx.DB
@@ -296,8 +302,11 @@ func main() {
 	GoPartManCmd.AddCommand(runMaintenanceCmd)
 	GoPartManCmd.AddCommand(undoPartitionCmd)
 	GoPartManCmd.AddCommand(getPartitionInfoCmd)
+	GoPartManCmd.AddCommand(getPartitionChildrenCmd)
 	GoPartManCmd.AddCommand(setPartitionRetentionCmd)
+	GoPartManCmd.AddCommand(checkParentCmd)
 	GoPartManCmd.AddCommand(removePartitionRetentionCmd)
+	GoPartManCmd.AddCommand(fixPartitionCmd)
 
 	GoPartManCmd.Execute()
 

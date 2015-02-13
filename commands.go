@@ -52,7 +52,6 @@ var installPartmanCmd = &cobra.Command{
 			l.Critical(err)
 			return
 		}
-
 		if !fServer.sqlFunctionsExist() {
 			l.Info("Installing pg_partman on " + flags.server)
 			fServer.loadPgPartman()
@@ -83,7 +82,7 @@ var reinstallPartmanCmd = &cobra.Command{
 var createParentCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Creates a partition",
-	Long: `Creates a partition for a given table based on the ` + "\x1b[33m\x1b[40m" + `gopartman.yml` + "\x1b[0m\x1b[0m" + ` configuration file.
+	Long: "\n" + `Creates a partition for a given table based on the ` + "\x1b[33m\x1b[40m" + `gopartman.yml` + "\x1b[0m\x1b[0m" + ` configuration file.
 	
 	Example: ./gopartman create -c /some/other/gopartman.yml -p mypartition
 
@@ -128,6 +127,7 @@ var runMaintenanceCmd = &cobra.Command{
 				l.Error("Error: pg_partman not installed. Please run the `install` command first.")
 				return
 			}
+
 			l.Info("Running maintenance on " + flags.server + " for table " + fPartition.Table)
 			fServer.RunMaintenance(fPartition)
 		}
@@ -145,10 +145,10 @@ var undoPartitionCmd = &cobra.Command{
 			l.Critical(err)
 			return
 		}
-
 		if !fServer.sqlFunctionsExist() {
 			fServer.loadPgPartman()
 		}
+
 		l.Info("Reverting a partition on " + flags.server + " for table " + flags.partition)
 		fServer.UndoPartition(fPartition)
 	},
@@ -158,7 +158,7 @@ var undoPartitionCmd = &cobra.Command{
 var getPartitionInfoCmd = &cobra.Command{
 	Use:   "info",
 	Short: "Info about a partition",
-	Long:  "\nDisplays information about a partition given its parent table.",
+	Long:  "\nDisplays information about a partition.",
 	Run: func(cmd *cobra.Command, args []string) {
 		fServer, fPartition, err := getFlaggedPartition()
 		if err != nil {
@@ -170,6 +170,51 @@ var getPartitionInfoCmd = &cobra.Command{
 		table := tablewriter.NewWriter(os.Stdout)
 		table.SetHeader([]string{"Table", "Control Column", "Type", "Interval", "# of Tables to Premake"})
 		table.Append([]string{info.ParentTable, info.Control, info.Type, info.PartInterval, strconv.Itoa(info.Premake)})
+		table.Render()
+	},
+}
+
+// Get information about a partition's children.
+var getPartitionChildrenCmd = &cobra.Command{
+	Use:   "children",
+	Short: "Child table info for a partition",
+	Long:  "\nDisplays information about a partition's child tables.",
+	Run: func(cmd *cobra.Command, args []string) {
+		fServer, fPartition, err := getFlaggedPartition()
+		if err != nil {
+			l.Critical(err)
+			return
+		}
+
+		children := fServer.GetChildPartitions(fPartition)
+		table := tablewriter.NewWriter(os.Stdout)
+		table.SetHeader([]string{"Table", "# of Records", "Size (bytes)"})
+		for _, child := range children {
+			table.Append([]string{child.Table, strconv.Itoa(child.Records), strconv.FormatUint(child.BytesOnDisk, 10)})
+		}
+		table.Render()
+	},
+}
+
+// Shows number of records inserted into the parent tables instead of child partition tables.
+var checkParentCmd = &cobra.Command{
+	Use:   "check",
+	Short: "Number of records left in parent tables",
+	Long:  "\nDisplays number of records inserted into parent tables instead of child partition tables." + "\n" + `Records can be moved with the ` + "\x1b[33m\x1b[40m" + `fix` + "\x1b[0m\x1b[0m" + ` command if child partition tables exist.`,
+	Run: func(cmd *cobra.Command, args []string) {
+		fServer, _, err := getFlaggedPartition()
+		if err != nil {
+			l.Critical(err)
+			return
+		}
+
+		parents := fServer.CheckParent()
+		table := tablewriter.NewWriter(os.Stdout)
+		table.SetHeader([]string{"Parent Table", "# of Records"})
+		for _, parent := range parents {
+			table.Append([]string{parent.Table, strconv.Itoa(parent.Records)})
+
+		}
 		table.Render()
 	},
 }
@@ -209,5 +254,32 @@ var removePartitionRetentionCmd = &cobra.Command{
 		}
 
 		fServer.RemoveRetention(fPartition)
+	},
+}
+
+// Cleans up a partition, moving any records from the parent table into child partition tables where possible.
+var fixPartitionCmd = &cobra.Command{
+	Use:   "fix",
+	Short: "Fix and clean up parent table",
+	Long:  "\nMoves data that accidentally gets inserted into the parent (or existing data before partitioning) into the proper child partition tables if available.",
+	Run: func(cmd *cobra.Command, args []string) {
+		fServer, fPartition, err := getFlaggedPartition()
+		if err != nil {
+			l.Critical(err)
+			return
+		}
+		if !fServer.sqlFunctionsExist() {
+			fServer.loadPgPartman()
+		}
+
+		pi := fServer.PartitionInfo(fPartition)
+		switch pi.Type {
+		case "time-dynamic", "time-static", "time-custom":
+			fServer.PartitionDataTime(fPartition)
+		case "id-dynamic", "id-static":
+			fServer.PartitionDataId(fPartition)
+		default:
+			l.Critical("The partition does not seem to have a proper type.")
+		}
 	},
 }

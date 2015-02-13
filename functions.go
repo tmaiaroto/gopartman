@@ -8,6 +8,8 @@ package main
 import (
 	"github.com/imdario/mergo"
 	"gopkg.in/guregu/null.v2"
+	"regexp"
+	"strconv"
 )
 
 // Creates a parent from a given table and creatse partitions based on the given settings.
@@ -132,6 +134,34 @@ func (db DB) GetChildPartitions(p *Partition) []Child {
 		}
 	}
 	return c
+}
+
+// Checks parent partition tables to see if any records were inserted there instead of the proper child partition tables. Can be fixed with PartitionDataTime() or PartitionDataId().
+func (db DB) CheckParent() []Parent {
+	ps := []Parent{}
+	// check_parent() returns a string: (parentTable,4) ... meaning a "parentTable" has 4 records. This needs to be parsed.
+	res := []struct {
+		ParentInfo string `db:"parent_info"`
+	}{}
+	// Make the query and get the row(s)
+	err := db.Select(&res, "SELECT partman.check_parent() AS parent_info")
+	if err != nil {
+		l.Error(err)
+		return ps
+	}
+	// Parse each row with regex
+	r, _ := regexp.Compile(`\((.*)\,([0-9]*)\)`)
+	for _, record := range res {
+		pInfo := r.FindStringSubmatch(record.ParentInfo)
+		if len(pInfo) == 3 {
+			recordCount, err := strconv.Atoi(pInfo[2])
+			if err == nil {
+				ps = append(ps, Parent{Table: pInfo[1], Records: recordCount})
+			}
+		}
+	}
+
+	return ps
 }
 
 // Sets a retention period on a partition
