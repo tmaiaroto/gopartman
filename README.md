@@ -20,5 +20,5 @@ to manage your Postgres partition tables. This package will do this maintenance 
 * Command line interface for managing partitions (configured in YAML or added via RESTful API)    
 * YAML configuration based management of partitions    
 * RESTful interface for managing partitions    
-* RESTful API for monitoring (with SVG rendering)    
+* ~~RESTful API for monitoring (with SVG rendering)~~ (to come)    
 * Monitoring of partition usage and database health    

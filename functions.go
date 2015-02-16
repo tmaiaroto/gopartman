@@ -191,8 +191,6 @@ func (db DB) ApplyForeignKeys(p *Partition, opts ...map[string]interface{}) {
 	if err != nil {
 		l.Error(err)
 	}
-
-	//apply_foreign_keys
 }
 
 // Sets a retention period on a partition
