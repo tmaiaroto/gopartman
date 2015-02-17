@@ -1,0 +1,22 @@
+api:
+  port: 3000
+servers:
+  local:
+    host: localhost
+    port: 5432
+    user: username
+    database: part-test
+    partitions:
+      test:
+        table: public.posts
+        retention: 1 month
+        interval: daily
+        type: time-custom
+        column: created
+        options:
+          functions:
+            undoPartition:
+              batchCount: 2
+          dropTableOnUndo: true
+          retentionKeepTable: true
+          retentionSchema: NULL
